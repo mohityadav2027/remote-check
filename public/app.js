@@ -16,6 +16,7 @@ const ago = d => { const days = Math.floor((Date.now() - parseDate(d)) / 864e5);
 const salary = j => (j.salary_min ? `$${Math.round(j.salary_min / 1000)}k–$${Math.round(j.salary_max / 1000)}k / yr` : 'Pay not listed');
 // Every job on Parakh is remote; show who can apply, e.g. "Remote · India"
 const remoteWhere = loc => { const l = String(loc || '').replace(/^remote\s*[,·–-]?\s*/i, '').trim(); return `Remote · ${esc(l || 'Worldwide')}`; };
+const freeN = () => state.trial?.limit ?? 2;   // free applications every new user gets
 const domainOf = url => { try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return ''; } };
 const params = () => new URLSearchParams(location.hash.split('?')[1] || '');
 
@@ -65,6 +66,7 @@ async function jobsPage() {
         <p class="eyebrow">For Indian professionals · International companies · Remote</p>
         <h1>Every remote job, <em>background-checked</em> before you apply.</h1>
         <p class="lede">We check each company's founding year, website age, how many jobs it posts, how many it fills, and whether the apply link is on the company's own hiring system. You apply on the employer's page.</p>
+        <p class="lede"><b>Your first ${freeN()} applications are free</b>, with the full background check. ${state.user ? '' : '<a href="#/signup">Create a free account</a>'}</p>
       </div>
       <div class="status" id="status" aria-live="polite"><span>Loading verified jobs…</span></div>
     </section>
@@ -142,8 +144,10 @@ function reportHtml(c, r, unlocked) {
   const checks = `<ul class="checks">${r.signals.map(x => `<li>${stIcon(x.impact > 0 ? 'ok' : x.impact <= -8 ? 'bad' : x.impact < 0 ? 'warn' : 'n')}
     <span>${esc(x.label)}</span><span class="val">${x.impact > 0 ? '+' : ''}${x.impact}</span>${x.detail ? `<span class="det">${esc(x.detail)}</span>` : ''}</li>`).join('')}</ul>`;
   if (!unlocked) return `<div class="report-grid">${facts}<div><p class="sub">Checks</p>${checks}</div>
-    <div class="lock">${r.hidden_signals ? `${r.hidden_signals} more checks, ` : 'More checks, '}the hiring history and the apply link come with a pass from ${inr(2 * (state.fx || 84))} a month.
-      <div style="margin-top:10px"><a class="btn primary sm" href="#/pricing">See plans</a></div></div></div>`;
+    <div class="lock">${r.hidden_signals ? `${r.hidden_signals} more checks, ` : 'More checks, '}the hiring history and the apply link are locked.
+      ${state.user ? `You've used your ${freeN()} free applications. A pass costs from ${inr(2 * (state.fx || 84))} a month.`
+        : `<b>Sign up free:</b> your first ${freeN()} applications include the full background check.`}
+      <div class="acts" style="margin-top:10px;justify-content:center">${state.user ? '' : '<a class="btn primary sm" href="#/signup">Sign up free</a>'}<a class="btn sm" href="#/pricing">See plans</a></div></div></div>`;
   const max = Math.max(1, ...(s.monthly || []).map(m => m.n));
   return `<div class="report-grid">${facts}
     <div><p class="sub">Hiring activity</p>
@@ -210,8 +214,13 @@ async function jobPage(id) {
       <div class="tags"><span class="tag seg">${esc(d.segment.name)} pass</span>${j.category ? `<span class="tag">${esc(j.category)}</span>` : ''}<span class="tag">${salary(j)}</span>
         ${j.match != null ? `<span class="tag ${j.match >= 50 ? 'ok' : ''}">Skill match ${j.match}%</span>` : ''}</div>
       <div class="acts" style="margin-top:16px;align-items:center">
-        <button type="button" class="btn primary" id="apply">${d.applied ? `Applied ✓ · open ${esc(j.apply_host)} again` : d.unlocked ? `Apply on ${esc(j.apply_host)} ↗` : 'Unlock to apply'}</button>
-        <span class="hint">You apply on the employer's original page (${esc(j.apply_host)}). We never ask you for money.</span></div>
+        <button type="button" class="btn primary" id="apply">${d.applied ? `Applied ✓ · open ${esc(j.apply_host)} again`
+          : !state.user ? `Sign up to apply · first ${d.trial.limit} free`
+          : d.paid ? `Apply on ${esc(j.apply_host)} ↗`
+          : d.free ? `Apply free on ${esc(j.apply_host)} ↗` : 'Get a pass to apply'}</button>
+        <span class="hint">${!d.applied && state.user && d.free
+          ? `This uses free application ${d.trial.used + 1} of ${d.trial.limit}. You apply on the employer's own page (${esc(j.apply_host)}).`
+          : `You apply on the employer's original page (${esc(j.apply_host)}). We never ask you for money.`}</span></div>
     </div>
     <div class="grid2">
       <div class="stack">
@@ -226,7 +235,7 @@ async function jobPage(id) {
     </div>`;
 
   $('#apply').addEventListener('click', async () => {
-    if (!state.user) { location.hash = '#/login?next=' + encodeURIComponent(location.hash); return; }
+    if (!state.user) { location.hash = '#/signup?next=' + encodeURIComponent(location.hash); return; }
     try {
       let r;
       try { r = await api(`/api/jobs/${id}/apply`, { method: 'POST', body: {} }); }
@@ -235,7 +244,10 @@ async function jobPage(id) {
         r = await api(`/api/jobs/${id}/apply`, { method: 'POST', body: { confirmRisky: true } });
       }
       window.open(r.apply_url, '_blank', 'noopener');
-      toast('Opened the employer\'s page. We added it to your applications.');
+      await loadMe();
+      await jobPage(id);
+      toast(r.free ? `Free application ${r.trial.used} of ${r.trial.limit} used. Opened the employer's page.${r.trial.left ? '' : ' Your next application needs a pass.'}`
+        : 'Opened the employer\'s page. We added it to your applications.');
     } catch (e) {
       if (e.data?.code === 'NEED_PLAN') { location.hash = '#/pricing?need=' + e.data.segment; return; }
       if (e.data?.code === 'NO_RESUME') { toast(e.message); location.hash = '#/profile'; return; }
@@ -315,8 +327,10 @@ async function pricingPage() {
     <div class="sec-head"><div><h1>One small monthly pass, priced by your segment</h1>
       <p>The pass unlocks full company reports and the apply links for ${p.days} days. Prices are set in US dollars and charged in rupees. Pay by UPI, card or netbanking.</p></div>
       <span class="hint mono">1 USD = ₹${p.fx_rate.toFixed(2)}</span></div>
-    ${need ? `<div class="notice">This job needs the <b>${esc(SEG[need])}</b> pass or higher.</div>` : ''}
-    ${active ? `<div class="notice ok">Your ${esc(SEG[active.segment])} pass is active until <b>${esc(fmtDate(active.expires_at))}</b>.</div>` : ''}
+    ${need ? `<div class="notice">You've used your ${freeN()} free applications. This job needs the <b>${esc(SEG[need])}</b> pass or higher.</div>` : ''}
+    ${active ? `<div class="notice ok">Your ${esc(SEG[active.segment])} pass is active until <b>${esc(fmtDate(active.expires_at))}</b>.</div>`
+      : !state.user ? `<div class="notice ok"><b>Try it free first.</b> Your first ${freeN()} applications are free, with the full background check. <a href="#/signup">Create a free account</a></div>`
+      : state.trial?.left && !need ? `<div class="notice ok">You still have <b>${state.trial.left} free application${state.trial.left === 1 ? '' : 's'}</b>. Use ${state.trial.left === 1 ? 'it' : 'them'} first; you can buy a pass later.</div>` : ''}
     ${p.payments === 'demo' ? '<div class="notice bad">Demo mode: no real payment is taken. Add Razorpay keys to go live.</div>' : ''}
     <div class="plans" id="plans" role="radiogroup" aria-label="Choose a pass">${p.segments.map(s => `
       <div class="plan" role="radio" tabindex="${s.key === picked ? 0 : -1}" aria-checked="${s.key === picked}" aria-labelledby="pl-${s.key}" data-plan="${s.key}">
@@ -373,7 +387,7 @@ function authPage(mode) {
   $app.innerHTML = `
     <form class="card" id="authForm" style="max-width:440px;margin:24px auto">
       <h1 style="font-size:26px;margin-bottom:6px">${mode === 'login' ? 'Log in' : 'Create your free profile'}</h1>
-      <p class="hint" style="margin-bottom:16px">${mode === 'login' ? 'Welcome back.' : 'Browse verified jobs for free. Pay only when you want to apply.'}</p>
+      <p class="hint" style="margin-bottom:16px">${mode === 'login' ? 'Welcome back.' : `Your first ${freeN()} applications are free, with the full background check. Pay only after that.`}</p>
       <div class="fields">
         ${mode === 'signup' ? '<div class="field full"><label for="aName">Full name</label><input id="aName" name="name" autocomplete="name" required></div>' : ''}
         <div class="field full"><label for="aEmail">Email</label><input id="aEmail" name="email" type="email" autocomplete="email" required></div>
@@ -427,7 +441,9 @@ async function profilePage() {
       <div class="stack">
         <div class="card"><h2>Your pass</h2>${state.plans.length
           ? state.plans.map(p => `<p><b>${esc(SEG[p.segment])}</b> · active until ${esc(fmtDate(p.expires_at))}</p>`).join('')
-          : '<p class="hint" style="margin-bottom:12px">No active pass. Reports and apply links are locked.</p><a class="btn sm" href="#/pricing">See plans</a>'}</div>
+          : `<p style="margin-bottom:6px"><b>Free trial:</b> ${state.trial.used} of ${state.trial.limit} free applications used.</p>
+            <p class="hint" style="margin-bottom:12px">${state.trial.left ? `You can apply to ${state.trial.left} more job${state.trial.left === 1 ? '' : 's'} for free.` : 'Your free applications are used up. Get a pass to keep applying.'}</p>
+            <a class="btn sm" href="#/pricing">See plans</a>`}</div>
         <div class="card"><h2>Applications you started</h2><div class="track">${apps.length ? apps.map(a => `<div>
             <span><a href="#/job/${a.job_id}">${esc(a.title)}</a><small>${esc(a.company)} · ${esc(fmtDate(a.applied_at))}${a.job_status === 'closed' ? ' · job closed' : ''}</small></span>
             <select data-app="${a.job_id}" aria-label="Status for ${esc(a.title)}">${['applied', 'interview', 'offer', 'rejected'].map(s =>

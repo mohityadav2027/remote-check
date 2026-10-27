@@ -40,6 +40,14 @@ function activePlans(userId) {
 }
 const hasAccess = (userId, segment) => activePlans(userId).some(p => planCovers(p.segment, segment));
 
+// Free trial: every new user can apply to their first FREE_APPLIES jobs (any plan level) without paying.
+const FREE_APPLIES = Number(process.env.FREE_APPLIES ?? 2);
+function trialInfo(userId) {
+  const used = db.prepare('SELECT COUNT(*) n FROM applications WHERE user_id = ?').get(userId).n;
+  return { limit: FREE_APPLIES, used: Math.min(used, FREE_APPLIES), left: Math.max(0, FREE_APPLIES - used) };
+}
+const hasApplied = (userId, jobId) => Boolean(db.prepare('SELECT 1 FROM applications WHERE user_id=? AND job_id=?').get(userId, jobId));
+
 // How well a job fits the user's skills (0–100)
 function matchScore(user, job) {
   const skills = (user?.skills || '').toLowerCase().split(',').map(s => s.trim()).filter(Boolean);
@@ -74,7 +82,7 @@ app.post('/api/logout', (req, res) => req.session.destroy(() => res.json({ ok: t
 
 app.get('/api/me', (req, res) => {
   const u = currentUser(req);
-  res.json({ user: publicUser(u), plans: u ? activePlans(u.id) : [] });
+  res.json({ user: publicUser(u), plans: u ? activePlans(u.id) : [], trial: u ? trialInfo(u.id) : { limit: FREE_APPLIES, used: 0, left: FREE_APPLIES } });
 });
 
 // ---------- profile + resume ----------
@@ -160,16 +168,21 @@ app.get('/api/jobs/:id', ah(async (req, res) => {
   let company = db.prepare('SELECT * FROM companies WHERE id=?').get(job.company_id);
   company = await refreshDomainAge(company);
   const report = scoreCompany(company, job);
-  const unlocked = Boolean(user && (user.is_admin || hasAccess(user.id, job.segment)));
+  const applied = Boolean(user && hasApplied(user.id, job.id));
+  const paid = Boolean(user && (user.is_admin || hasAccess(user.id, job.segment)));
+  // Free-trial users see the full background check on any job they can still apply to for free
+  const free = Boolean(user && !paid && (applied || trialInfo(user.id).left > 0));
+  const unlocked = paid || free;
   const { apply_url, ...safeJob } = job;
   res.json({
     job: { ...safeJob, apply_host: new URL(apply_url).hostname, match: matchScore(user, job) },
     company,
     report: unlocked ? report : { score: report.score, level: report.level, locked: true,
       signals: report.signals.slice(0, 2), hidden_signals: Math.max(0, report.signals.length - 2), stats: { posted90: report.stats.posted90 } },
-    unlocked,
+    unlocked, paid, free,
     segment: SEGMENTS[job.segment],
-    applied: Boolean(user && db.prepare('SELECT 1 FROM applications WHERE user_id=? AND job_id=?').get(user.id, job.id)),
+    applied,
+    trial: user ? trialInfo(user.id) : { limit: FREE_APPLIES, used: 0, left: FREE_APPLIES },
   });
 }));
 
@@ -178,14 +191,17 @@ app.post('/api/jobs/:id/apply', auth, (req, res) => {
   const job = db.prepare('SELECT * FROM jobs WHERE id=?').get(req.params.id);
   if (!job) return res.status(404).json({ error: 'Job not found' });
   if (!req.user.resume_path) return res.status(400).json({ error: 'Upload your resume in your profile before applying', code: 'NO_RESUME' });
-  if (!req.user.is_admin && !hasAccess(req.user.id, job.segment))
-    return res.status(402).json({ error: `This job needs the ${SEGMENTS[job.segment].name} plan`, code: 'NEED_PLAN', segment: job.segment });
+  const paid = req.user.is_admin || hasAccess(req.user.id, job.segment);
+  const again = hasApplied(req.user.id, job.id);   // opening a job you already applied to never costs anything
+  if (!paid && !again && trialInfo(req.user.id).left === 0)
+    return res.status(402).json({ error: `You've used your ${FREE_APPLIES} free applications. This job needs the ${SEGMENTS[job.segment].name} pass.`,
+      code: 'NEED_PLAN', segment: job.segment });
   const company = db.prepare('SELECT * FROM companies WHERE id=?').get(job.company_id);
   const { level } = scoreCompany(company, job);
   if (level === 'risky' && !req.body?.confirmRisky)
     return res.status(409).json({ error: 'This job failed our background check. Are you sure?', code: 'RISKY' });
   db.prepare('INSERT OR IGNORE INTO applications (user_id, job_id) VALUES (?,?)').run(req.user.id, job.id);
-  res.json({ apply_url: job.apply_url });
+  res.json({ apply_url: job.apply_url, free: !paid && !again, trial: trialInfo(req.user.id) });
 });
 
 // ---------- companies ----------
@@ -194,7 +210,7 @@ app.get('/api/companies/:id', ah(async (req, res) => {
   let company = db.prepare('SELECT * FROM companies WHERE id=?').get(req.params.id);
   if (!company) return res.status(404).json({ error: 'Company not found' });
   company = await refreshDomainAge(company);
-  const unlocked = Boolean(user && (user.is_admin || activePlans(user.id).length));
+  const unlocked = Boolean(user && (user.is_admin || activePlans(user.id).length || trialInfo(user.id).left > 0));
   const report = scoreCompany(company);
   const jobs = db.prepare(`SELECT id, title, segment, status, posted_at, closed_at FROM jobs WHERE company_id=? ORDER BY posted_at DESC LIMIT 50`).all(company.id);
   res.json({ company, report: unlocked ? report : { score: report.score, level: report.level, locked: true, signals: report.signals.slice(0, 2), stats: {} }, jobs, unlocked });

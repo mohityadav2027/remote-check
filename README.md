@@ -26,6 +26,9 @@ Sign up with the `ADMIN_EMAIL` address to get the **Admin** page. There you can 
 
 The score runs from 0 to 100: **Verified** is 70 or more, **Check carefully** is 45–69, **Risky** is below 45. Risky jobs are hidden from the job list.
 
+## Free trial
+Every new user's **first 2 applications are free**, on any job and any plan level, with the full background check on those jobs. After that, applying needs a pass. Opening a job you already applied to never counts again. Change the number with `FREE_APPLIES` (for example `FREE_APPLIES=3`, or `0` for no trial).
+
 ## Pricing (`lib/pricing.js`)
 | Plan | USD / 30 days | Covers |
 |---|---|---|
