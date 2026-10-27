@@ -14,6 +14,8 @@ const parseDate = d => new Date(String(d).includes('T') ? d : String(d).replace(
 const fmtDate = d => (d ? parseDate(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '');
 const ago = d => { const days = Math.floor((Date.now() - parseDate(d)) / 864e5); return days <= 0 ? 'today' : days === 1 ? '1 day ago' : `${days} days ago`; };
 const salary = j => (j.salary_min ? `$${Math.round(j.salary_min / 1000)}k–$${Math.round(j.salary_max / 1000)}k / yr` : 'Pay not listed');
+// Every job on Parakh is remote; show who can apply, e.g. "Remote · India"
+const remoteWhere = loc => { const l = String(loc || '').replace(/^remote\s*[,·–-]?\s*/i, '').trim(); return `Remote · ${esc(l || 'Worldwide')}`; };
 const domainOf = url => { try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return ''; } };
 const params = () => new URLSearchParams(location.hash.split('?')[1] || '');
 
@@ -115,7 +117,7 @@ async function loadJobs(filters, first = false) {
       <div style="min-width:0">
         <h2><a href="#/job/${j.id}">${esc(j.title)}</a></h2>
         <div class="co"><button type="button" class="linkbtn" data-company="${j.company_id}">${esc(j.company_name)}</button>
-          <span>${esc(j.location || 'Remote')}</span>${j.hq_country ? `<span>HQ ${esc(j.hq_country)}</span>` : ''}${j.founded_year ? `<span>Founded ${j.founded_year}</span>` : ''}</div>
+          <span>${remoteWhere(j.location)}</span>${j.hq_country ? `<span>HQ ${esc(j.hq_country)}</span>` : ''}${j.founded_year ? `<span>Founded ${j.founded_year}</span>` : ''}</div>
         <div class="tags"><span class="tag seg">${SEG[j.segment]}</span>${j.category ? `<span class="tag">${esc(j.category)}</span>` : ''}
           ${j.match != null ? `<span class="tag ${j.match >= 50 ? 'ok' : ''}">Skill match ${j.match}%</span>` : ''}<span class="tag">via ${esc(j.source)}</span><span class="tag">${esc(ago(j.posted_at))}</span></div>
       </div>
@@ -203,7 +205,7 @@ async function jobPage(id) {
     <div class="card" style="margin-bottom:24px">
       <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">${seal(d.report.score, d.report.level, 64)}
         <div style="min-width:0;flex:1"><h1 style="font-size:clamp(24px,3vw,32px)">${esc(j.title)}</h1>
-          <div class="co"><button type="button" class="linkbtn" data-company="${d.company.id}">${esc(d.company.name)}</button><span>${esc(j.location)}</span><span>Posted ${esc(ago(j.posted_at))} via ${esc(j.source)}</span></div></div>
+          <div class="co"><button type="button" class="linkbtn" data-company="${d.company.id}">${esc(d.company.name)}</button><span>${remoteWhere(j.location)}</span><span>Posted ${esc(ago(j.posted_at))} via ${esc(j.source)}</span></div></div>
         ${pill(d.report.level)}</div>
       <div class="tags"><span class="tag seg">${esc(d.segment.name)} pass</span>${j.category ? `<span class="tag">${esc(j.category)}</span>` : ''}<span class="tag">${salary(j)}</span>
         ${j.match != null ? `<span class="tag ${j.match >= 50 ? 'ok' : ''}">Skill match ${j.match}%</span>` : ''}</div>

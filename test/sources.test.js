@@ -47,10 +47,14 @@ const FIXTURES = {
       updated_at: '2026-10-25T00:00:00Z', first_published: '2026-10-25T00:00:00Z', content: '&lt;p&gt;Vue.js&lt;/p&gt;', departments: [{ name: 'Engineering' }] },
     { id: 502, title: 'Account Executive', absolute_url: 'https://boards.greenhouse.io/gitlab/jobs/502', location: { name: 'Remote, US' },
       updated_at: '2026-10-25T00:00:00Z', content: '', departments: [] },
+    { id: 503, title: 'Office Manager', absolute_url: 'https://boards.greenhouse.io/gitlab/jobs/503', location: { name: 'Bengaluru, India' },
+      updated_at: '2026-10-25T00:00:00Z', content: 'Work from our Bengaluru office', departments: [] },
   ] },
   'api.lever.co': [
     { id: 'abc', text: 'Data Analyst', hostedUrl: 'https://jobs.lever.co/acme/abc', categories: { location: 'India', team: 'Data', commitment: 'Full-time' },
-      descriptionPlain: 'SQL and dashboards', createdAt: 1792500000000 },
+      workplaceType: 'remote', descriptionPlain: 'SQL and dashboards', createdAt: 1792500000000 },
+    { id: 'def', text: 'Operations Manager', hostedUrl: 'https://jobs.lever.co/acme/def', categories: { location: 'Mumbai, India', team: 'Ops' },
+      workplaceType: 'onsite', descriptionPlain: 'Office role', createdAt: 1792500000000 },
   ],
   'api.ashbyhq.com': { jobs: [
     { id: 'z1', title: 'Support Engineer', department: 'Support', location: 'Remote', isRemote: true, isListed: true,
@@ -98,6 +102,16 @@ test('only jobs open to India / worldwide / Asia are kept', () => {
     assert.ok(!indiaEligible({ location: loc }), loc);
 });
 
+test('only remote jobs: office jobs on company careers pages are skipped', async () => {
+  const gh = await ats.greenhouse.fetch('gitlab', 'GitLab');
+  assert.equal(gh.find(j => j.title === 'Frontend Engineer').remote, true);
+  assert.equal(gh.find(j => j.title === 'Office Manager').remote, false);
+  assert.ok(!indiaEligible(gh.find(j => j.title === 'Office Manager')), 'Bengaluru office job kept');
+  const lv = await ats.lever.fetch('acme', 'Acme');
+  assert.ok(indiaEligible(lv.find(j => j.title === 'Data Analyst')), 'remote India job dropped');
+  assert.ok(!indiaEligible(lv.find(j => j.title === 'Operations Manager')), 'Mumbai onsite job kept');
+});
+
 test('careers page links are recognised', () => {
   assert.deepEqual(parseCareersUrl('https://boards.greenhouse.io/gitlab'), { type: 'greenhouse', board: 'gitlab' });
   assert.deepEqual(parseCareersUrl('https://job-boards.greenhouse.io/embed/job_board?for=stripe'), { type: 'greenhouse', board: 'stripe' });
@@ -116,6 +130,7 @@ test('import saves India-eligible jobs, skips duplicates, and closes jobs remove
   const titles = db.prepare(`SELECT title FROM jobs ORDER BY title`).all().map(r => r.title);
   assert.ok(titles.includes('Backend Engineer') && titles.includes('Virtual Assistant') && titles.includes('Senior DevOps Engineer'));
   assert.ok(!titles.includes('Sales Rep') && !titles.includes('Accountant') && !titles.includes('Account Executive'), 'non-India jobs were imported');
+  assert.ok(!titles.includes('Office Manager'), 'office (non-remote) job was imported');
   assert.equal(titles.filter(t => t === 'Frontend Engineer').length, 1, 'duplicate across sources');
   assert.equal(first['greenhouse:gitlab'].added, 1, 'careers page job saved');
   assert.equal(first.remotive.duplicate, 1, 'job-board copy of the same job skipped');
@@ -152,8 +167,9 @@ test('every kind of job gets a sensible plan, not just engineering', () => {
   const { classifySegment } = require('../lib/pricing');
   const expected = {
     basic: ['Data Entry Operator', 'AI Data Annotator', 'Virtual Assistant', 'Customer Support Specialist', 'Online English Tutor', 'Transcriptionist', 'Content Moderator', 'Content Writer'],
-    pro: ['Social Media Manager', 'Bookkeeper', 'Video Editor', 'Graphic Designer', 'HR Recruiter', 'Translator (Hindi-English)', 'Medical Coder', 'Account Executive', 'Frontend Developer', 'Project Manager'],
-    premium: ['Senior Backend Engineer', 'Machine Learning Engineer', 'Engineering Manager', 'Head of Marketing', 'Data Scientist'],
+    pro: ['Social Media Manager', 'Bookkeeper', 'Video Editor', 'Graphic Designer', 'HR Recruiter', 'Translator (Hindi-English)', 'Medical Coder', 'Account Executive', 'Frontend Developer', 'Project Manager',
+      'Customer Success Manager', 'Customer Support Manager', 'Support Team Supervisor', 'Operations Manager', 'Marketing Manager', 'Finance Manager', 'HR Manager', 'Community Manager', 'Scrum Master'],
+    premium: ['Senior Backend Engineer', 'Machine Learning Engineer', 'Engineering Manager', 'Product Manager', 'Program Manager', 'Head of Marketing', 'Director of Operations', 'VP of Sales', 'Senior Project Manager', 'Data Scientist'],
   };
   for (const [seg, titles] of Object.entries(expected)) for (const t of titles) assert.equal(classifySegment(t), seg, t);
 });

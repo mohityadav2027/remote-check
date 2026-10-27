@@ -48,6 +48,7 @@ Payments go through **Razorpay** (UPI, cards, netbanking). If no Razorpay keys a
 | **Working Nomads** | Remote job board | JSON API |
 | **We Work Remotely** | Remote job board | RSS feed |
 
+- **Remote jobs only.** The job boards list nothing but remote jobs. Company careers pages also list office jobs, so from those only jobs marked remote are imported.
 - Only jobs whose location says India, Asia/APAC, worldwide or anywhere are imported.
 - Careers pages are imported first. When the same job is on a board too, the employer's own listing is kept, and it is counted once (so it doesn't look like a reposted "ghost job").
 - A job that disappears from a careers page is marked closed. That feeds the "openings filled/closed" number in the background check.
