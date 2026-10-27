@@ -136,3 +136,14 @@ test('import saves India-eligible jobs, skips duplicates, and closes jobs remove
   assert.match(third.jobicy.error, /503/);
   assert.match(db.prepare(`SELECT error FROM source_status WHERE source='jobicy'`).get().error, /503/);
 });
+
+test('scam scanner flags common scam messages and passes genuine ones', () => {
+  const { textChecks } = require('../lib/verify');
+  const scam = 'Hiring for Amazon work-from-home data entry. Earn ₹4,000 per day, no experience needed. Limited seats! Pay ₹1,499 one-time registration fee. Contact HR on Telegram @amazon_jobs_hr or email amazonhiring.india@gmail.com';
+  const labels = textChecks(scam).map(h => h.label);
+  for (const l of ['Asks you to pay money', 'Recruiter only on WhatsApp or Telegram', 'Personal email address (Gmail, Yahoo…)', 'Pay too good for the work', 'Pressure to act fast'])
+    assert.ok(labels.includes(l), `missing: ${l}`);
+  assert.ok(labels.some(l => l.startsWith("Uses Amazon's name")), 'brand impersonation not caught');
+  assert.equal(textChecks('Remote React developer. Apply at https://boards.greenhouse.io/acme/jobs/1 or write to jobs@acme.com').length, 0);
+  assert.equal(textChecks('Amazon is hiring. Apply on https://www.amazon.jobs/en/jobs/123').length, 0, 'real Amazon post flagged');
+});

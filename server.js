@@ -10,7 +10,7 @@ const bcrypt = require('bcryptjs');
 const db = require('./lib/db');
 const seed = require('./lib/seed');
 const { SEGMENTS, PLAN_DAYS, priceList, classifySegment, planCovers } = require('./lib/pricing');
-const { scoreCompany, refreshDomainAge } = require('./lib/verify');
+const { scoreCompany, refreshDomainAge, domainCreated, hostOf, registrableDomain, textChecks, RED_FLAGS } = require('./lib/verify');
 const payments = require('./lib/payments');
 const { runImport } = require('./lib/importer');
 const { BOARDS, parseCareersUrl } = require('./lib/sources');
@@ -79,9 +79,11 @@ app.get('/api/me', (req, res) => {
 
 // ---------- profile + resume ----------
 app.put('/api/profile', auth, (req, res) => {
-  const { name, phone, headline, skills, experience_years } = req.body || {};
-  db.prepare('UPDATE users SET name=COALESCE(?,name), phone=?, headline=?, skills=?, experience_years=? WHERE id=?')
-    .run(name || null, phone || null, headline || null, skills || null, Number(experience_years) || 0, req.user.id);
+  const { name, phone, headline, skills, experience_years, target_role, hours, linkedin_url } = req.body || {};
+  const clip = (v, n) => (v ? String(v).trim().slice(0, n) : null);
+  db.prepare(`UPDATE users SET name=COALESCE(?,name), phone=?, headline=?, skills=?, experience_years=?, target_role=?, hours=?, linkedin_url=? WHERE id=?`)
+    .run(clip(name, 80), clip(phone, 30), clip(headline, 120), clip(skills, 400), Number(experience_years) || 0,
+      clip(target_role, 80), clip(hours, 60), clip(linkedin_url, 160), req.user.id);
   res.json({ user: publicUser(currentUser(req)) });
 });
 
@@ -107,15 +109,24 @@ app.get('/api/profile/resume', auth, (req, res) => {
 });
 
 app.get('/api/profile/applications', auth, (req, res) => {
-  res.json(db.prepare(`SELECT a.created_at applied_at, j.id job_id, j.title, j.apply_url, c.id company_id, c.name company
+  res.json(db.prepare(`SELECT a.created_at applied_at, a.status, j.id job_id, j.title, j.status job_status, c.id company_id, c.name company
     FROM applications a JOIN jobs j ON j.id=a.job_id JOIN companies c ON c.id=j.company_id WHERE a.user_id=? ORDER BY a.id DESC`).all(req.user.id));
+});
+
+// Job seekers track what happened after they applied
+app.put('/api/profile/applications/:jobId', auth, (req, res) => {
+  const status = req.body?.status;
+  if (!['applied', 'interview', 'offer', 'rejected'].includes(status)) return res.status(400).json({ error: 'Unknown status' });
+  const r = db.prepare('UPDATE applications SET status=? WHERE user_id=? AND job_id=?').run(status, req.user.id, req.params.jobId);
+  if (!r.changes) return res.status(404).json({ error: 'Application not found' });
+  res.json({ ok: true });
 });
 
 // ---------- jobs ----------
 app.get('/api/jobs', (req, res) => {
   const user = currentUser(req);
   const { q = '', segment = '', category = '', minScore = '', showRisky = '' } = req.query;
-  const rows = db.prepare(`SELECT j.*, c.name company_name FROM jobs j JOIN companies c ON c.id=j.company_id
+  const rows = db.prepare(`SELECT j.*, c.name company_name, c.founded_year, c.hq_country FROM jobs j JOIN companies c ON c.id=j.company_id
     WHERE j.status='open' AND j.india_eligible=1
       AND (? = '' OR j.title LIKE ? OR j.tags LIKE ? OR c.name LIKE ?)
       AND (? = '' OR j.segment = ?) AND (? = '' OR j.category = ?)
@@ -123,16 +134,20 @@ app.get('/api/jobs', (req, res) => {
     .all(q, `%${q}%`, `%${q}%`, `%${q}%`, segment, segment, category, category);
 
   const companyCache = {};
+  const blocked = [];
   const jobs = rows.map(j => {
     const company = companyCache[j.company_id] ??= db.prepare('SELECT * FROM companies WHERE id=?').get(j.company_id);
-    const { score, level } = scoreCompany(company, j);
+    const { score, level, signals } = scoreCompany(company, j);
+    if (level === 'risky') blocked.push({ title: j.title, company: j.company_name,
+      why: signals.filter(x => x.impact < 0).sort((a, b) => a.impact - b.impact).slice(0, 3).map(x => x.label).join(' · ') });
     const { apply_url, description, ...rest } = j;
     return { ...rest, snippet: (description || '').slice(0, 180), trust_score: score, trust_level: level, match: matchScore(user, j) };
   }).filter(j => (showRisky === '1' || j.trust_level !== 'risky') && j.trust_score >= (Number(minScore) || 0));
 
   const categories = db.prepare(`SELECT DISTINCT category FROM jobs WHERE status='open' AND category IS NOT NULL ORDER BY category`).all().map(r => r.category);
-  const hidden = rows.length - jobs.length;
-  res.json({ jobs: jobs.slice(0, 100), categories, hidden_risky: hidden });
+  res.json({ jobs: jobs.slice(0, 100), categories, hidden_risky: blocked.length, blocked: blocked.slice(0, 10),
+    companies: new Set(jobs.map(j => j.company_id)).size,
+    last_refresh: db.prepare('SELECT MAX(last_run) t FROM source_status WHERE error IS NULL').get().t });
 });
 
 app.get('/api/jobs/:id', ah(async (req, res) => {
@@ -191,6 +206,66 @@ app.post('/api/companies/:id/report', auth, (req, res) => {
   res.json({ ok: true });
 });
 
+// ---------- scan a job post or recruiter message ----------
+// Small per-visitor limit, since every scan can trigger a domain lookup.
+const scanHits = new Map();
+function scanLimited(ip) {
+  const now = Date.now(), recent = (scanHits.get(ip) || []).filter(t => now - t < 60e3);
+  recent.push(now); scanHits.set(ip, recent);
+  return recent.length > 20;
+}
+
+app.post('/api/scan', ah(async (req, res) => {
+  if (scanLimited(req.ip)) return res.status(429).json({ error: 'Too many checks in a minute. Wait a moment and try again.' });
+  const text = String(req.body?.text || '').slice(0, 6000).trim();
+  const company = String(req.body?.company || '').trim().slice(0, 80);
+  const website = String(req.body?.website || '').trim().slice(0, 120);
+  if (text.length < 30) return res.status(400).json({ error: 'Paste the full job post or message, at least a few lines.' });
+
+  const hits = textChecks(text, website);
+  const checks = RED_FLAGS.map(r => {
+    const hit = hits.find(h => h.label === r.label);
+    return { label: r.label, status: hit ? r.level : 'ok', detail: hit ? r.why : '' };
+  });
+  for (const h of hits) if (!RED_FLAGS.some(r => r.label === h.label)) checks.unshift({ label: h.label, status: h.level, detail: h.why });
+
+  let score = 80 - hits.reduce((s, h) => s + h.impact, 0);
+  const created = website ? await domainCreated(website) : null;
+  if (website) {
+    const days = created ? (Date.now() - Date.parse(created)) / 864e5 : null;
+    const fresh = days != null && days < 365;
+    if (fresh) score -= 20;
+    checks.push({ label: 'Website age', status: created ? (fresh ? 'bad' : 'ok') : 'warn',
+      detail: created ? `${registrableDomain(hostOf(website))} was registered on ${created}.${fresh ? ' Scam sites are usually only weeks or months old.' : ''}`
+        : 'We could not look up when this website was registered.' });
+  }
+
+  // Is the company already in our records?
+  const domain = registrableDomain(hostOf(website || ''));
+  const known = db.prepare(`SELECT * FROM companies WHERE (? != '' AND lower(name) = lower(?)) OR (? IS NOT NULL AND website LIKE ?) LIMIT 1`)
+    .get(company, company, domain, `%${domain}%`);
+  let knownCompany = null;
+  if (known) {
+    const r = scoreCompany(known);
+    knownCompany = { id: known.id, name: known.name, website: known.website, score: r.score, level: r.level };
+    if (r.level === 'verified') score += 10;
+  }
+  score = Math.max(0, Math.min(100, score));
+  const bad = hits.filter(h => h.level === 'bad').length;
+  const verdict = bad >= 2 || score < 45 ? 'scam' : bad === 1 || score < 70 ? 'suspicious' : 'clear';
+  res.json({ score, verdict, checks, known: knownCompany });
+}));
+
+app.post('/api/check-requests', auth, (req, res) => {
+  const company = String(req.body?.company || '').trim().slice(0, 80);
+  const website = String(req.body?.website || '').trim().slice(0, 120);
+  if (!company) return res.status(400).json({ error: 'Enter the company name first.' });
+  const dup = db.prepare(`SELECT 1 FROM check_requests WHERE user_id=? AND lower(company)=lower(?)`).get(req.user.id, company);
+  if (dup) return res.status(409).json({ error: 'You already asked for this company. We\'ll add its report after we research it.' });
+  db.prepare('INSERT INTO check_requests (user_id, company, website) VALUES (?,?,?)').run(req.user.id, company, website || null);
+  res.json({ ok: true });
+});
+
 // ---------- pricing + payment ----------
 app.get('/api/pricing', ah(async (req, res) => res.json({ ...(await priceList()), payments: payments.enabled ? 'razorpay' : 'demo' })));
 
@@ -225,6 +300,17 @@ app.post('/api/checkout/verify', auth, (req, res) => {
 });
 
 // ---------- admin ----------
+app.get('/api/admin/check-requests', admin, (req, res) => {
+  res.json(db.prepare(`SELECT r.id, r.company, r.website, r.status, r.created_at, u.name requested_by, COUNT(*) OVER (PARTITION BY lower(r.company)) asks
+    FROM check_requests r JOIN users u ON u.id = r.user_id ORDER BY r.status = 'done', r.id DESC LIMIT 100`).all());
+});
+app.post('/api/admin/check-requests/:id/done', admin, (req, res) => {
+  const r = db.prepare(`SELECT company FROM check_requests WHERE id=?`).get(req.params.id);
+  if (!r) return res.status(404).json({ error: 'Request not found' });
+  db.prepare(`UPDATE check_requests SET status='done' WHERE lower(company)=lower(?)`).run(r.company);
+  res.json({ ok: true });
+});
+
 app.get('/api/admin/companies', admin, (req, res) => res.json(db.prepare('SELECT id, name FROM companies ORDER BY name').all()));
 
 app.post('/api/admin/companies', admin, ah(async (req, res) => {

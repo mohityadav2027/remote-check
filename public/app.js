@@ -1,138 +1,230 @@
-// Tiny single-page app: hash routes -> render functions. No framework needed.
-const $app = document.getElementById('app');
+// Parakh front end: hash routes -> page functions. No framework needed.
+const $ = s => document.querySelector(s);
+const $app = $('#app');
 const state = { user: null, plans: [] };
 
+const SEG = { basic: 'Entry', pro: 'Professional', premium: 'Senior & Specialist' };
+const LEVEL = { verified: 'Verified', caution: 'Check carefully', risky: 'Risky' };
+const TONE = { verified: 'ok', caution: 'warn', risky: 'bad' };
+const ATS = { greenhouse: 'Greenhouse', lever: 'Lever', ashby: 'Ashby' };
+
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const inr = n => '₹' + Number(n).toLocaleString('en-IN');
-const ago = d => { const days = Math.floor((Date.now() - Date.parse(d.replace(' ', 'T') + 'Z')) / 864e5); return days <= 0 ? 'today' : days === 1 ? '1 day ago' : `${days} days ago`; };
-const LEVEL = { verified: '✔ Verified', caution: '⚠ Check carefully', risky: '✖ Risky' };
-const LEVEL_TEXT = { verified: 'Verified', caution: 'Check carefully', risky: 'Risky' };
-const badge = (level, score) => `<span class="badge ${level}" role="img" aria-label="${LEVEL_TEXT[level]}${score != null ? `, trust score ${score} out of 100` : ''}">${LEVEL[level]}${score != null ? ` · ${score}` : ''}</span>`;
-const salary = j => j.salary_min ? `$${(j.salary_min / 1000).toFixed(0)}k–$${(j.salary_max / 1000).toFixed(0)}k / yr` : '';
+const inr = n => '₹' + Math.round(n).toLocaleString('en-IN');
+const parseDate = d => new Date(String(d).includes('T') ? d : String(d).replace(' ', 'T') + 'Z');
+const fmtDate = d => (d ? parseDate(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '');
+const ago = d => { const days = Math.floor((Date.now() - parseDate(d)) / 864e5); return days <= 0 ? 'today' : days === 1 ? '1 day ago' : `${days} days ago`; };
+const salary = j => (j.salary_min ? `$${Math.round(j.salary_min / 1000)}k–$${Math.round(j.salary_max / 1000)}k / yr` : 'Pay not listed');
+const domainOf = url => { try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return ''; } };
+const params = () => new URLSearchParams(location.hash.split('?')[1] || '');
+
+function toast(msg) {
+  const t = $('#toast');
+  t.textContent = msg; t.classList.add('on');
+  clearTimeout(toast.timer); toast.timer = setTimeout(() => t.classList.remove('on'), 3200);
+}
+
+// Trust score dial. level: verified | caution | risky (or null while unknown)
+function seal(score, level, size = 52) {
+  const tone = level ? TONE[level] : 'none', C = 2 * Math.PI * 21, off = score == null ? C : C * (1 - score / 100);
+  return `<div class="seal ${tone === 'ok' ? '' : tone}" style="width:${size}px;height:${size}px" role="img"
+    aria-label="${score == null ? 'Score pending' : `Trust score ${score} out of 100, ${LEVEL[level]}`}">
+    <svg viewBox="0 0 50 50"><circle class="trk" cx="25" cy="25" r="21"/><circle class="arc" cx="25" cy="25" r="21" stroke-dasharray="${C}" stroke-dashoffset="${off}"/></svg>
+    <span class="n" aria-hidden="true">${score ?? '…'}</span></div>`;
+}
+const pill = level => `<span class="pill ${TONE[level]}">${LEVEL[level]}</span>`;
+const stIcon = s => `<span class="st ${s}" aria-hidden="true">${s === 'ok' ? '✓' : s === 'warn' ? '!' : s === 'bad' ? '✕' : '–'}</span>`;
 
 async function api(path, opts = {}) {
-  const res = await fetch(path, { headers: opts.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }, ...opts,
-    body: opts.body && !(opts.body instanceof FormData) ? JSON.stringify(opts.body) : opts.body });
+  const isForm = opts.body instanceof FormData;
+  const res = await fetch(path, { ...opts, headers: isForm ? {} : { 'Content-Type': 'application/json' },
+    body: opts.body && !isForm ? JSON.stringify(opts.body) : opts.body });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw Object.assign(new Error(data.error || 'Request failed'), { status: res.status, data });
+  if (!res.ok) throw Object.assign(new Error(data.error || 'Something went wrong. Try again.'), { status: res.status, data });
   return data;
 }
 
-async function loadMe() { Object.assign(state, await api('/api/me')); renderNav(); }
+async function loadMe() { Object.assign(state, await api('/api/me')); }
 
-function renderNav() {
+function renderNav(page) {
   const u = state.user;
-  document.getElementById('nav').innerHTML = `<a href="#/">Jobs</a><a href="#/pricing">Pricing</a>` +
-    (u ? `${u.is_admin ? '<a href="#/admin">Admin</a>' : ''}<a href="#/profile">My profile</a><button type="button" class="linklike" id="logout">Logout</button>`
-       : `<a href="#/login">Login</a><a href="#/signup" class="btn">Sign up</a>`);
-  document.getElementById('logout')?.addEventListener('click', async e => { e.preventDefault(); await api('/api/logout', { method: 'POST' }); await loadMe(); location.hash = '#/'; });
+  const link = (href, label, key) => `<a href="${href}"${page === key ? ' aria-current="page"' : ''}>${label}</a>`;
+  $('#nav').innerHTML = link('#/', 'Jobs', 'jobs') + link('#/scan', 'Scan a job', 'scan') + link('#/pricing', 'Pricing', 'pricing') +
+    (u ? (u.is_admin ? link('#/admin', 'Admin', 'admin') : '') + link('#/profile', 'My profile', 'profile') + '<button type="button" id="logout">Log out</button>'
+       : link('#/login', 'Log in', 'login') + '<a href="#/signup" class="btn primary sm">Sign up</a>');
+  $('#logout')?.addEventListener('click', async () => { await api('/api/logout', { method: 'POST' }); await loadMe(); location.hash = '#/'; toast('Logged out.'); });
 }
 
-// ---------- pages ----------
-async function homePage() {
-  const params = new URLSearchParams(location.hash.split('?')[1] || '');
+// ---------- jobs ----------
+async function jobsPage() {
+  const p = params();
   $app.innerHTML = `
     <section class="hero">
-      <h1>Genuine international remote jobs, open to India</h1>
-      <p class="muted">Every company is background-checked: founding year, website age, hiring history, repost patterns and scam signals.</p>
+      <div>
+        <p class="eyebrow">For Indian professionals · International companies · Remote</p>
+        <h1>Every remote job, <em>background-checked</em> before you apply.</h1>
+        <p class="lede">We check each company's founding year, website age, how many jobs it posts, how many it fills, and whether the apply link is on the company's own hiring system. You apply on the employer's page.</p>
+      </div>
+      <div class="status" id="status" aria-live="polite"><span>Loading verified jobs…</span></div>
     </section>
-    <form class="card row filters" id="f">
-      <input name="q" type="search" aria-label="Search jobs" placeholder="Search title, skill or company" value="${esc(params.get('q'))}">
-      <select name="segment" aria-label="Experience level"><option value="">All levels</option><option value="basic">Starter (entry / non-tech)</option><option value="pro">Professional</option><option value="premium">Senior / specialist</option></select>
-      <select name="category" aria-label="Category"><option value="">All categories</option></select>
-      <button>Search</button>
+    <form class="toolbar" id="filters" role="search">
+      <label for="q" class="sr-only">Search jobs</label>
+      <input id="q" name="q" type="search" placeholder="Search role, skill or company" value="${esc(p.get('q'))}">
+      <div class="chips" role="group" aria-label="Filter by plan">${[['', 'All'], ...Object.entries(SEG)].map(([k, l]) =>
+        `<button type="button" class="chip" data-seg="${k}" aria-pressed="${(p.get('segment') || '') === k}">${l}</button>`).join('')}</div>
+      <label for="category" class="sr-only">Category</label>
+      <select id="category" name="category"><option value="">All categories</option></select>
+      <span class="count" id="count" role="status"></span>
     </form>
-    <div id="list"><p class="muted">Loading jobs…</p></div>`;
-  const f = document.getElementById('f');
-  f.segment.value = params.get('segment') || '';
-  f.onsubmit = e => { e.preventDefault(); location.hash = '#/?' + new URLSearchParams(new FormData(f)).toString(); };
+    <div class="jobs" id="jobList"></div>
+    <details class="blocked" id="blocked" hidden><summary>${stIcon('bad')}<span id="blockedTitle"></span></summary><ul id="blockedList"></ul></details>
+    <p class="sources" id="sources"></p>`;
 
-  const data = await api('/api/jobs?' + params.toString());
-  f.category.innerHTML += data.categories.map(c => `<option>${esc(c)}</option>`).join('');
-  f.category.value = params.get('category') || '';
-  document.getElementById('list').innerHTML = `<p class="muted small" role="status">${data.jobs.length} verified job${data.jobs.length === 1 ? '' : 's'}</p>` + (data.jobs.length ? data.jobs.map(j => `
-    <article class="card job">
-      <div class="row between">
-        <div>
-          <h2><a href="#/job/${j.id}">${esc(j.title)}</a></h2>
-          <a class="muted" href="#/company/${j.company_id}">${esc(j.company_name)}</a>
-        </div>
-        ${badge(j.trust_level, j.trust_score)}
-      </div>
-      <p class="muted small">${esc(j.snippet)}…</p>
-      <div class="row small">
-        <span class="pill">${esc(j.location || 'Remote')}</span>
-        ${j.category ? `<span class="pill">${esc(j.category)}</span>` : ''}
-        ${salary(j) ? `<span class="pill">${salary(j)}</span>` : ''}
-        ${j.match != null ? `<span class="pill">Skill match ${j.match}%</span>` : ''}
-        <span class="muted">Posted ${ago(j.posted_at)}</span>
-      </div>
-    </article>`).join('') : '<div class="card muted">No jobs found.</div>') +
-    (data.hidden_risky ? `<p class="muted small">🛡 ${data.hidden_risky} job(s) hidden because they failed our background check.</p>` : '');
-  const { sources } = await api('/api/sources');
-  document.getElementById('list').insertAdjacentHTML('beforeend', `<p class="muted small">Jobs collected from ${sources.map(x => x.site
-    ? `<a href="${esc(x.site)}" target="_blank" rel="noopener">${esc(x.label)}</a>` : esc(x.label)).join(', ')}. You always apply on the original listing.</p>`);
+  const f = $('#filters');
+  const filters = { q: p.get('q') || '', segment: p.get('segment') || '', category: p.get('category') || '' };
+  const update = () => {
+    const qs = new URLSearchParams(Object.entries(filters).filter(([, v]) => v)).toString();
+    history.replaceState(null, '', '#/' + (qs ? '?' + qs : ''));
+    loadJobs(filters);
+  };
+  f.addEventListener('submit', e => { e.preventDefault(); filters.q = f.q.value.trim(); update(); });
+  let t; f.q.addEventListener('input', () => { clearTimeout(t); t = setTimeout(() => { filters.q = f.q.value.trim(); update(); }, 300); });
+  f.querySelectorAll('[data-seg]').forEach(b => b.addEventListener('click', () => {
+    filters.segment = b.dataset.seg;
+    f.querySelectorAll('[data-seg]').forEach(x => x.setAttribute('aria-pressed', x === b));
+    update();
+  }));
+  f.category.addEventListener('change', () => { filters.category = f.category.value; update(); });
+
+  await loadJobs(filters, true);
+  api('/api/sources').then(({ sources }) => {
+    $('#sources').innerHTML = `Jobs collected from ${sources.map(s => s.site ? `<a href="${esc(s.site)}" target="_blank" rel="noopener">${esc(s.label)}</a>` : esc(s.label)).join(', ')}. You always apply on the original listing.`;
+  }).catch(() => {});
 }
 
-function reportCard(report, company) {
-  const s = report.stats || {};
+async function loadJobs(filters, first = false) {
+  const data = await api('/api/jobs?' + new URLSearchParams(filters));
+  const sel = $('#category');
+  if (!sel) return;   // user navigated away
+  if (first) { sel.innerHTML += data.categories.map(c => `<option>${esc(c)}</option>`).join(''); sel.value = filters.category; }
+  $('#status').innerHTML = `<span><i class="dot" aria-hidden="true"></i><b>${data.jobs.length} verified job${data.jobs.length === 1 ? '' : 's'}</b> from <b>${data.companies} compan${data.companies === 1 ? 'y' : 'ies'}</b></span>
+    <span>${data.last_refresh ? `Last refreshed ${esc(ago(data.last_refresh))}` : 'Refreshed every 6 hours'} · risky jobs are hidden</span>`;
+  $('#count').textContent = `${data.jobs.length} shown`;
+  $('#jobList').innerHTML = data.jobs.length ? data.jobs.map(j => `
+    <article class="job">
+      ${seal(j.trust_score, j.trust_level)}
+      <div style="min-width:0">
+        <h2><a href="#/job/${j.id}">${esc(j.title)}</a></h2>
+        <div class="co"><button type="button" class="linkbtn" data-company="${j.company_id}">${esc(j.company_name)}</button>
+          <span>${esc(j.location || 'Remote')}</span>${j.hq_country ? `<span>HQ ${esc(j.hq_country)}</span>` : ''}${j.founded_year ? `<span>Founded ${j.founded_year}</span>` : ''}</div>
+        <div class="tags"><span class="tag seg">${SEG[j.segment]}</span>${j.category ? `<span class="tag">${esc(j.category)}</span>` : ''}
+          ${j.match != null ? `<span class="tag ${j.match >= 50 ? 'ok' : ''}">Skill match ${j.match}%</span>` : ''}<span class="tag">via ${esc(j.source)}</span><span class="tag">${esc(ago(j.posted_at))}</span></div>
+      </div>
+      <div class="side"><div class="pay">${salary(j)}</div>
+        <div class="acts"><button type="button" class="btn sm" data-company="${j.company_id}">Report</button><a class="btn primary sm" href="#/job/${j.id}">View &amp; apply</a></div></div>
+    </article>`).join('')
+    : `<div class="empty"><b>No verified jobs match that search</b>Try another skill, company or plan.</div>`;
+  const b = $('#blocked');
+  b.hidden = !data.blocked.length;
+  $('#blockedTitle').textContent = `${data.hidden_risky} job${data.hidden_risky === 1 ? '' : 's'} hidden because they failed our checks`;
+  $('#blockedList').innerHTML = data.blocked.map(x => `<li><b>${esc(x.title)}</b> at ${esc(x.company)} · ${esc(x.why)}</li>`).join('');
+}
+
+// ---------- company report (used in the drawer, the company page and the job page) ----------
+function reportHtml(c, r, unlocked) {
+  const year = new Date().getFullYear(), s = r.stats || {};
+  const facts = `<dl class="facts">
+    <div><dt>Founded</dt><dd>${c.founded_year ? `${c.founded_year} (${year - c.founded_year} yrs)` : 'Not public'}</dd></div>
+    <div><dt>Team size</dt><dd>${c.employee_count ? `${c.employee_count} people` : 'Not public'}</dd></div>
+    <div><dt>Website since</dt><dd>${c.domain_created ? fmtDate(c.domain_created) : c.website ? 'Not checked yet' : 'No website'}</dd></div>
+    <div><dt>Hiring system</dt><dd>${c.ats_type ? `${ATS[c.ats_type]} careers page` : 'Job boards'}</dd></div></dl>`;
+  const checks = `<ul class="checks">${r.signals.map(x => `<li>${stIcon(x.impact > 0 ? 'ok' : x.impact <= -8 ? 'bad' : x.impact < 0 ? 'warn' : 'n')}
+    <span>${esc(x.label)}</span><span class="val">${x.impact > 0 ? '+' : ''}${x.impact}</span>${x.detail ? `<span class="det">${esc(x.detail)}</span>` : ''}</li>`).join('')}</ul>`;
+  if (!unlocked) return `<div class="report-grid">${facts}<div><p class="sub">Checks</p>${checks}</div>
+    <div class="lock">${r.hidden_signals ? `${r.hidden_signals} more checks, ` : 'More checks, '}the hiring history and the apply link come with a pass from ${inr(2 * (state.fx || 84))} a month.
+      <div style="margin-top:10px"><a class="btn primary sm" href="#/pricing">See plans</a></div></div></div>`;
   const max = Math.max(1, ...(s.monthly || []).map(m => m.n));
-  return `
-    <div class="card ${report.locked ? 'locked' : ''}">
-      <div class="row between">
-        <div><h2 style="margin:0">Company background check</h2><span class="muted small">${esc(company.name)}</span></div>
-        <div style="text-align:right"><div class="score">${report.score}<span class="muted small">/100</span></div>${badge(report.level)}</div>
-      </div>
-      ${report.locked ? '' : `
-      <div class="stats">
-        <div class="stat"><b>${company.founded_year || '—'}</b><span class="muted small">Founded</span></div>
-        <div class="stat"><b>${company.employee_count ?? '—'}</b><span class="muted small">Employees</span></div>
-        <div class="stat"><b>${company.domain_created ? company.domain_created.slice(0, 4) : '—'}</b><span class="muted small">Website since</span></div>
-        <div class="stat"><b>${s.posted30}</b><span class="muted small">Jobs posted (30 days)</span></div>
-        <div class="stat"><b>${s.posted90}</b><span class="muted small">Jobs posted (90 days)</span></div>
-        <div class="stat"><b>${s.closed}</b><span class="muted small">Openings filled/closed</span></div>
-        <div class="stat"><b>${s.avgDaysOpen ?? '—'}</b><span class="muted small">Avg days a job stays open</span></div>
-        <div class="stat"><b>${(s.reports?.hired || 0)}</b><span class="muted small">Members hired</span></div>
-      </div>
-      ${s.monthly?.length ? `<p class="small muted" style="margin:16px 0 0">Jobs posted per month (last 12 months)</p>
-        <div class="bars" role="img" aria-label="Jobs posted per month: ${s.monthly.map(m => `${m.month} ${m.n}`).join(', ')}">${s.monthly.map(m => `<div style="height:${(m.n / max) * 100}%" title="${m.month}: ${m.n}"><span>${m.month.slice(5)}</span></div>`).join('')}</div><br>` : ''}`}
-      <ul class="signals">${report.signals.map(x => `
-        <li><span class="imp ${x.impact > 0 ? 'plus' : x.impact < 0 ? 'minus' : 'zero'}">${x.impact > 0 ? '+' : ''}${x.impact}</span>
-        <div>${esc(x.label)}${x.detail ? `<div class="muted small">${esc(x.detail)}</div>` : ''}</div></li>`).join('')}</ul>
-      ${report.locked ? `<p><b>🔒 ${report.hidden_signals ?? 'More'} more checks, hiring history and the apply link are locked.</b><br>
-        <a class="btn" href="#/pricing">Unlock from ${'$'}2/month</a></p>` : ''}
-    </div>`;
+  return `<div class="report-grid">${facts}
+    <div><p class="sub">Hiring activity</p>
+      <dl class="facts">
+        <div><dt>Jobs posted, last 30 days</dt><dd>${s.posted30}</dd></div><div><dt>Jobs posted, last 90 days</dt><dd>${s.posted90}</dd></div>
+        <div><dt>Open now</dt><dd>${s.open}</dd></div><div><dt>Closed or filled</dt><dd>${s.closed}</dd></div>
+        <div><dt>Days a job stays open</dt><dd>${s.avgDaysOpen ?? '–'}</dd></div><div><dt>Members hired here</dt><dd>${s.reports?.hired || 0}</dd></div></dl>
+      ${s.monthly?.length ? `<div class="bars" role="img" aria-label="Jobs posted per month: ${s.monthly.map(m => `${m.month} ${m.n}`).join(', ')}">${s.monthly.map(m =>
+        `<div style="height:${(m.n / max) * 100}%"><span>${m.month.slice(5)}</span></div>`).join('')}</div>` : ''}
+      <p class="hint">Companies don't publish how many people they hire, so we count jobs that close, plus what our members report.</p></div>
+    <div><p class="sub">Checks</p>${checks}</div></div>`;
 }
 
-async function jobPage(id) {
-  const d = await api('/api/jobs/' + id);
-  const j = d.job;
-  $app.innerHTML = `
-    <div id="msg"></div>
-    <div class="card">
-      <div class="row between">
-        <div><h1 style="margin:0">${esc(j.title)}</h1><a href="#/company/${d.company.id}">${esc(d.company.name)}</a></div>
-        ${badge(d.report.level, d.report.score)}
-      </div>
-      <div class="row small" style="margin:10px 0">
-        <span class="pill">${esc(j.location)}</span>${j.category ? `<span class="pill">${esc(j.category)}</span>` : ''}
-        ${salary(j) ? `<span class="pill">${salary(j)}</span>` : ''}<span class="pill">Plan: ${esc(d.segment.name)}</span>
-        ${j.match != null ? `<span class="pill">Skill match ${j.match}%</span>` : ''}<span class="muted">Posted ${ago(j.posted_at)} · via ${esc(j.source)}</span>
-      </div>
-      <div class="row">
-        <button id="apply" ${d.applied ? 'class="ghost"' : ''}>${d.applied ? 'Applied ✓ – open again' : d.unlocked ? `Apply on ${esc(j.apply_host)}` : '🔒 Apply'}</button>
-        <span class="muted small">You'll apply on the employer's original page (${esc(j.apply_host)}).</span>
-      </div>
-    </div>
-    ${reportCard(d.report, d.company)}
-    <div class="card"><h3>Job description</h3><div class="desc">${esc(j.description || 'See original posting.')}</div></div>
-    ${state.user ? `<div class="card"><h3>Applied here before? Help others</h3><div class="row">
-      ${[['hired', '🎉 I got hired'], ['interview', '💬 Got an interview'], ['no_response', '🕳 No response'], ['scam', '🚩 Report scam']]
-        .map(([k, t]) => `<button class="ghost" data-report="${k}">${t}</button>`).join('')}</div></div>` : ''}`;
+let drawerOpener = null;
+async function openCompany(id) {
+  drawerOpener = document.activeElement;
+  const d = await api('/api/companies/' + id).catch(e => { toast(e.message); return null; });
+  if (!d) return;
+  const c = d.company;
+  $('#drHead').innerHTML = `${seal(d.report.score, d.report.level, 56)}<div style="min-width:0"><h2 id="drTitle">${esc(c.name)}</h2>
+    <p class="mono">${esc(domainOf(c.website) || 'no website')}${c.hq_country ? ' · ' + esc(c.hq_country) : ''}</p></div>
+    <button type="button" class="btn ghost sm x" id="drClose" aria-label="Close report">✕</button>`;
+  const open = d.jobs.filter(j => j.status === 'open');
+  $('#drBody').innerHTML = `${c.description ? `<p>${esc(c.description)}</p>` : ''}${reportHtml(c, d.report, d.unlocked)}
+    <div><p class="sub">Open jobs here (${open.length})</p>${open.map(j => `<div style="display:flex;justify-content:space-between;gap:10px;padding:10px 0;border-top:1px solid var(--line);font-size:14px">
+      <a href="#/job/${j.id}">${esc(j.title)}</a><span class="hint">${esc(SEG[j.segment])}</span></div>`).join('') || '<p class="hint">None open right now.</p>'}</div>
+    <p class="hint"><a href="#/company/${c.id}">Open as a full page</a>${c.website ? ` · <a href="${esc(c.website)}" target="_blank" rel="noopener">Company website</a>` : ''}${c.linkedin_url ? ` · <a href="${esc(c.linkedin_url)}" target="_blank" rel="noopener">LinkedIn</a>` : ''}</p>`;
+  $('#drawer').classList.add('on'); $('#scrim').classList.add('on'); $('#drawer').setAttribute('aria-hidden', 'false');
+  $('#drClose').addEventListener('click', closeCompany);
+  setTimeout(() => $('#drClose').focus(), 60);
+}
+function closeCompany() {
+  if (!$('#drawer').classList.contains('on')) return;
+  $('#drawer').classList.remove('on'); $('#scrim').classList.remove('on'); $('#drawer').setAttribute('aria-hidden', 'true');
+  drawerOpener?.focus?.();
+}
+$('#scrim').addEventListener('click', closeCompany);
+addEventListener('keydown', e => { if (e.key === 'Escape') closeCompany(); });
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-company]');
+  if (b) { e.preventDefault(); openCompany(b.dataset.company); return; }
+  if (e.target.closest('#drawer a[href^="#/"]')) closeCompany();
+});
 
-  const msg = (t, ok) => { document.getElementById('msg').innerHTML = `<div class="alert ${ok ? 'ok' : 'err'}" role="${ok ? 'status' : 'alert'}">${t}</div>`; scrollTo(0, 0); };
-  document.getElementById('apply').onclick = async () => {
-    if (!state.user) return (location.hash = '#/login?next=' + encodeURIComponent(location.hash));
+async function companyPage(id) {
+  const d = await api('/api/companies/' + id), c = d.company;
+  $app.innerHTML = `<div class="sec-head"><div style="display:flex;gap:16px;align-items:center">${seal(d.report.score, d.report.level, 64)}
+      <div><h1>${esc(c.name)}</h1><p>${esc(c.description || domainOf(c.website) || '')}</p></div></div>${pill(d.report.level)}</div>
+    <div class="grid2"><div class="card"><h2>Background check</h2>${reportHtml(c, d.report, d.unlocked)}</div>
+      <div class="card"><h2>Job history</h2><div class="scroll"><table class="admin"><thead><tr><th scope="col">Role</th><th scope="col">Posted</th><th scope="col">Status</th></tr></thead><tbody>
+        ${d.jobs.map(j => `<tr><td>${j.status === 'open' ? `<a href="#/job/${j.id}">${esc(j.title)}</a>` : esc(j.title)}</td><td class="mono">${fmtDate(j.posted_at)}</td>
+          <td><span class="pill ${j.status === 'open' ? 'ok' : 'n'}">${j.status}</span></td></tr>`).join('')}</tbody></table></div></div></div>`;
+}
+
+// ---------- job page ----------
+async function jobPage(id) {
+  const d = await api('/api/jobs/' + id), j = d.job;
+  $app.innerHTML = `
+    <div class="card" style="margin-bottom:24px">
+      <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">${seal(d.report.score, d.report.level, 64)}
+        <div style="min-width:0;flex:1"><h1 style="font-size:clamp(24px,3vw,32px)">${esc(j.title)}</h1>
+          <div class="co"><button type="button" class="linkbtn" data-company="${d.company.id}">${esc(d.company.name)}</button><span>${esc(j.location)}</span><span>Posted ${esc(ago(j.posted_at))} via ${esc(j.source)}</span></div></div>
+        ${pill(d.report.level)}</div>
+      <div class="tags"><span class="tag seg">${esc(d.segment.name)} pass</span>${j.category ? `<span class="tag">${esc(j.category)}</span>` : ''}<span class="tag">${salary(j)}</span>
+        ${j.match != null ? `<span class="tag ${j.match >= 50 ? 'ok' : ''}">Skill match ${j.match}%</span>` : ''}</div>
+      <div class="acts" style="margin-top:16px;align-items:center">
+        <button type="button" class="btn primary" id="apply">${d.applied ? `Applied ✓ · open ${esc(j.apply_host)} again` : d.unlocked ? `Apply on ${esc(j.apply_host)} ↗` : 'Unlock to apply'}</button>
+        <span class="hint">You apply on the employer's original page (${esc(j.apply_host)}). We never ask you for money.</span></div>
+    </div>
+    <div class="grid2">
+      <div class="stack">
+        <div class="card"><h2>About the job</h2><div class="desc">${esc(j.description || 'See the original posting for details.')}</div></div>
+        ${state.user ? `<div class="card"><h2>Applied here before? Tell others</h2><p class="hint" style="margin-bottom:12px">Your answer changes this company's score.</p>
+          <div class="acts">${[['hired', 'I got hired'], ['interview', 'Got an interview'], ['no_response', 'No response'], ['scam', 'Report a scam']]
+            .map(([k, t]) => `<button type="button" class="btn sm" data-report="${k}">${t}</button>`).join('')}</div>
+          <div id="scamNote" hidden style="margin-top:12px" class="field"><label for="scamText">What happened? For example, they asked for a fee.</label>
+            <textarea id="scamText" style="min-height:80px"></textarea><div><button type="button" class="btn primary sm" id="scamSend">Send report</button></div></div></div>` : ''}
+      </div>
+      <div class="card"><h2>Company background check</h2>${reportHtml(d.company, d.report, d.unlocked)}</div>
+    </div>`;
+
+  $('#apply').addEventListener('click', async () => {
+    if (!state.user) { location.hash = '#/login?next=' + encodeURIComponent(location.hash); return; }
     try {
       let r;
       try { r = await api(`/api/jobs/${id}/apply`, { method: 'POST', body: {} }); }
@@ -141,226 +233,339 @@ async function jobPage(id) {
         r = await api(`/api/jobs/${id}/apply`, { method: 'POST', body: { confirmRisky: true } });
       }
       window.open(r.apply_url, '_blank', 'noopener');
-      msg('Opened the original job page in a new tab. We saved this in "My applications".', true);
+      toast('Opened the employer\'s page. We added it to your applications.');
     } catch (e) {
-      if (e.data?.code === 'NEED_PLAN') return (location.hash = '#/pricing?need=' + e.data.segment);
-      if (e.data?.code === 'NO_RESUME') { msg(esc(e.message) + ' → <a href="#/profile">Go to profile</a>'); return; }
-      msg(esc(e.message));
+      if (e.data?.code === 'NEED_PLAN') { location.hash = '#/pricing?need=' + e.data.segment; return; }
+      if (e.data?.code === 'NO_RESUME') { toast(e.message); location.hash = '#/profile'; return; }
+      toast(e.message);
     }
+  });
+  const report = async (kind, note = '') => {
+    try { await api(`/api/companies/${d.company.id}/report`, { method: 'POST', body: { kind, note, job_id: j.id } }); toast('Thanks. Your report updates this company\'s score.'); }
+    catch (e) { toast(e.message); }
   };
-  document.querySelectorAll('[data-report]').forEach(b => b.onclick = async () => {
-    const note = b.dataset.report === 'scam' ? prompt('What happened? (e.g. asked for a fee)') : '';
-    if (note === null) return;
-    try { await api(`/api/companies/${d.company.id}/report`, { method: 'POST', body: { kind: b.dataset.report, note, job_id: j.id } }); msg('Thanks! Your report updates this company\'s score.', true); }
-    catch (e) { msg(esc(e.message)); }
+  document.querySelectorAll('[data-report]').forEach(b => b.addEventListener('click', () => {
+    if (b.dataset.report !== 'scam') return report(b.dataset.report);
+    $('#scamNote').hidden = false; $('#scamText').focus();
+  }));
+  $('#scamSend')?.addEventListener('click', () => { report('scam', $('#scamText').value); $('#scamNote').hidden = true; });
+}
+
+// ---------- scan a job ----------
+const SAMPLE_SCAM = 'Hiring for Amazon work-from-home data entry. Earn ₹4,000 per day, no experience needed. Limited seats! Pay ₹1,499 one-time registration fee for your training kit. Contact HR Priya on Telegram @amazon_jobs_hr or email amazonhiring.india@gmail.com';
+function scanPage() {
+  $app.innerHTML = `
+    <div class="sec-head"><div><h1>Scan a job post or recruiter message</h1>
+      <p>Got a job on WhatsApp, Telegram, Naukri or LinkedIn and not sure it's real? Paste it here. We check it for the signs that most job scams in India share.</p></div></div>
+    <div class="grid2">
+      <form class="card" id="scanForm">
+        <div class="fields">
+          <div class="field"><label for="scCompany">Company name</label><input id="scCompany" name="company" placeholder="e.g. GlobalEarn Partners" autocomplete="off"></div>
+          <div class="field"><label for="scSite">Company website (if given)</label><input id="scSite" name="website" placeholder="e.g. globalearn-partners.online" autocomplete="off"></div>
+          <div class="field full"><label for="scText">Job post or message</label>
+            <textarea id="scText" name="text" aria-describedby="scHint">${esc(SAMPLE_SCAM)}</textarea>
+            <span class="hint" id="scHint">The example above is a typical scam message. Replace it with yours.</span></div>
+          <div class="field full acts"><button class="btn primary" type="submit" id="scanBtn">Check this job</button>
+            <button class="btn" type="button" id="reqBtn">Ask us to check this company</button></div>
+        </div>
+      </form>
+      <div class="card" aria-live="polite">
+        <h2>Result</h2>
+        <ul class="checks" id="scanChecks"><li>${stIcon('n')}<span class="muted">Paste a job and press Check this job.</span><span></span></li></ul>
+        <div id="scanVerdict"></div><div id="scanKnown"></div>
+      </div>
+    </div>`;
+  const f = $('#scanForm');
+  f.addEventListener('submit', async e => {
+    e.preventDefault();
+    $('#scanBtn').disabled = true;
+    $('#scanChecks').innerHTML = `<li><span class="st run" aria-hidden="true"></span><span>Checking…</span><span></span></li>`;
+    try {
+      const r = await api('/api/scan', { method: 'POST', body: { company: f.company.value, website: f.website.value, text: f.text.value } });
+      $('#scanChecks').innerHTML = r.checks.map(k => `<li>${stIcon(k.status)}<span>${esc(k.label)}</span>
+        <span class="val">${k.label === 'Website age' ? '' : k.status === 'ok' ? 'not found' : 'found'}</span>${k.detail ? `<span class="det">${esc(k.detail)}</span>` : ''}</li>`).join('');
+      const level = r.verdict === 'clear' ? 'verified' : r.verdict === 'suspicious' ? 'caution' : 'risky';
+      $('#scanVerdict').innerHTML = `<div class="verdict">${seal(r.score, level, 48)}<p style="flex:1"><strong>${
+        r.verdict === 'scam' ? 'Likely a scam' : r.verdict === 'suspicious' ? 'Be careful' : 'No common scam signs'}</strong>${
+        r.verdict === 'clear' ? 'That alone doesn\'t prove it\'s real. Find the same job on the company\'s own careers page before you apply.'
+        : 'Do not pay anything or share your Aadhaar, PAN, bank details or OTPs.'}</p></div>`;
+      $('#scanKnown').innerHTML = r.known ? `<div class="verdict">${seal(r.known.score, r.known.level, 44)}<p style="flex:1"><strong>${esc(r.known.name)} is in our records</strong>
+        Make sure the job is also on ${esc(domainOf(r.known.website) || 'its own careers page')}.</p><button type="button" class="btn sm" data-company="${r.known.id}">Open report</button></div>` : '';
+    } catch (err) { $('#scanChecks').innerHTML = ''; toast(err.message); }
+    finally { $('#scanBtn').disabled = false; }
+  });
+  $('#reqBtn').addEventListener('click', async () => {
+    if (!f.company.value.trim()) { toast('Enter the company name first.'); f.company.focus(); return; }
+    if (!state.user) { toast('Log in to ask for a company check.'); location.hash = '#/login?next=' + encodeURIComponent('#/scan'); return; }
+    try { await api('/api/check-requests', { method: 'POST', body: { company: f.company.value, website: f.website.value } }); toast(`Thanks. We'll research ${f.company.value.trim()} and add its report.`); }
+    catch (err) { toast(err.message); }
   });
 }
 
-async function companyPage(id) {
-  const d = await api('/api/companies/' + id);
-  const c = d.company;
-  $app.innerHTML = `
-    <div class="card">
-      <h1 style="margin:0">${esc(c.name)}</h1>
-      <p class="muted">${esc(c.description || '')}</p>
-      <div class="row small">
-        ${c.website ? `<a href="${esc(c.website)}" target="_blank" rel="noopener">Website ↗</a>` : ''}
-        ${c.linkedin_url ? `<a href="${esc(c.linkedin_url)}" target="_blank" rel="noopener">LinkedIn ↗</a>` : ''}
-        ${c.hq_country ? `<span class="pill">HQ: ${esc(c.hq_country)}</span>` : ''}
-      </div>
-    </div>
-    ${reportCard(d.report, c)}
-    <div class="card"><h3>Job history</h3><table><tr><th>Role</th><th>Posted</th><th>Status</th></tr>
-      ${d.jobs.map(j => `<tr><td>${j.status === 'open' ? `<a href="#/job/${j.id}">${esc(j.title)}</a>` : esc(j.title)}</td><td>${j.posted_at.slice(0, 10)}</td><td>${j.status}</td></tr>`).join('')}
-    </table></div>`;
-}
-
-function authPage(mode) {
-  const next = new URLSearchParams(location.hash.split('?')[1] || '').get('next') || '#/profile';
-  $app.innerHTML = `
-    <form class="card" id="f" style="max-width:420px;margin:30px auto">
-      <h1 style="font-size:24px;margin-top:0">${mode === 'login' ? 'Log in' : 'Create your free profile'}</h1>
-      <div id="msg"></div>
-      ${mode === 'signup' ? '<label>Full name</label><input name="name" required>' : ''}
-      <label>Email</label><input name="email" type="email" required>
-      <label>Password</label><input name="password" type="password" minlength="8" required>
-      <br><br><button style="width:100%">${mode === 'login' ? 'Log in' : 'Sign up'}</button>
-      <p class="small muted">${mode === 'login' ? 'New here? <a href="#/signup">Create an account</a>' : 'Already registered? <a href="#/login">Log in</a>'}</p>
-    </form>`;
-  const f = document.getElementById('f');
-  f.onsubmit = async e => {
-    e.preventDefault();
-    try { await api('/api/' + mode, { method: 'POST', body: Object.fromEntries(new FormData(f)) }); await loadMe(); location.hash = next; }
-    catch (err) { document.getElementById('msg').innerHTML = `<div class="alert err" role="alert">${esc(err.message)}</div>`; }
-  };
-}
-
-async function profilePage() {
-  if (!state.user) return (location.hash = '#/login');
-  const u = state.user;
-  const apps = await api('/api/profile/applications');
-  $app.innerHTML = `
-    <div id="msg"></div>
-    <div class="grid">
-      <form class="card" id="pf">
-        <h1 style="margin-top:0;font-size:24px">My profile</h1>
-        <label>Name</label><input name="name" value="${esc(u.name)}">
-        <label>Phone</label><input name="phone" value="${esc(u.phone)}">
-        <label>Headline</label><input name="headline" placeholder="e.g. React developer, 3 yrs" value="${esc(u.headline)}">
-        <label>Skills (comma separated – used to match jobs)</label><input name="skills" placeholder="react, node, english, customer support" value="${esc(u.skills)}">
-        <label>Years of experience</label><input name="experience_years" type="number" min="0" value="${u.experience_years || 0}">
-        <br><br><button>Save profile</button>
-      </form>
-      <div>
-        <form class="card" id="rf">
-          <h2 style="margin-top:0;font-size:18px">Resume</h2>
-          ${u.resume_name ? `<p>Current: <a href="/api/profile/resume">${esc(u.resume_name)}</a></p>` : '<p class="muted">No resume yet. You need one before applying.</p>'}
-          <input type="file" name="resume" aria-label="Resume file, PDF or Word, up to 5 MB" accept=".pdf,.doc,.docx" required>
-          <br><br><button>Upload resume</button>
-        </form>
-        <div class="card">
-          <h2 style="margin-top:0;font-size:18px">My plans</h2>
-          ${state.plans.length ? state.plans.map(p => `<p><b>${p.segment.toUpperCase()}</b> – active until ${p.expires_at.slice(0, 10)}</p>`).join('') : '<p class="muted">No active plan.</p>'}
-          <a class="btn ghost" href="#/pricing">See plans</a>
-        </div>
-      </div>
-    </div>
-    <div class="card"><h2 style="margin-top:0;font-size:18px">My applications</h2>
-      ${apps.length ? `<table><tr><th>Job</th><th>Company</th><th>Date</th></tr>${apps.map(a => `<tr><td><a href="#/job/${a.job_id}">${esc(a.title)}</a></td><td>${esc(a.company)}</td><td>${a.applied_at.slice(0, 10)}</td></tr>`).join('')}</table>` : '<p class="muted">You haven\'t applied anywhere yet.</p>'}
-    </div>`;
-  const msg = (t, ok) => document.getElementById('msg').innerHTML = `<div class="alert ${ok ? 'ok' : 'err'}" role="${ok ? 'status' : 'alert'}">${esc(t)}</div>`;
-  const pf = document.getElementById('pf');
-  pf.onsubmit = async e => { e.preventDefault(); try { state.user = (await api('/api/profile', { method: 'PUT', body: Object.fromEntries(new FormData(pf)) })).user; msg('Profile saved', true); } catch (err) { msg(err.message); } };
-  const rf = document.getElementById('rf');
-  rf.onsubmit = async e => { e.preventDefault(); try { await api('/api/profile/resume', { method: 'POST', body: new FormData(rf) }); await loadMe(); profilePage(); } catch (err) { msg(err.message); } };
-}
-
+// ---------- pricing ----------
 async function pricingPage() {
-  const need = new URLSearchParams(location.hash.split('?')[1] || '').get('need');
+  const need = params().get('need');
   const p = await api('/api/pricing');
+  state.fx = p.fx_rate;
+  let picked = need || state.plans[0]?.segment || 'basic';
+  const active = state.plans[0];
   $app.innerHTML = `
-    <section class="hero"><h1>Simple monthly plans</h1>
-      <p class="muted">Pay once for ${p.days} days. Prices in USD converted to INR at today's rate (1 USD = ₹${p.fx_rate.toFixed(2)}).</p>
-      ${need ? `<div class="alert err" role="alert">This job needs the <b>${esc(p.segments.find(s => s.key === need)?.name)}</b> plan or higher.</div>` : ''}
-      ${p.payments === 'demo' ? '<div class="alert err small">DEMO MODE: no real payment is taken. Add Razorpay keys in .env to go live.</div>' : ''}
-    </section>
-    <div id="msg"></div>
-    <div class="grid">${p.segments.map(s => `
-      <div class="card plan ${s.key === (need || 'pro') ? 'best' : ''}">
-        <h2 style="margin:0;font-size:18px">${esc(s.name)}</h2>
-        <div class="price">${inr(s.inr)}</div><div class="muted small">≈ $${s.usd} · ${p.days} days</div>
-        <p>${esc(s.covers)}</p>
-        <ul class="small"><li>Full company background reports</li><li>Hiring history & scam signals</li><li>Apply links to original job pages</li><li>Application tracking</li></ul>
-        <button data-buy="${s.key}" style="width:100%">Get ${esc(s.name)}</button>
-      </div>`).join('')}</div>`;
-  document.querySelectorAll('[data-buy]').forEach(b => b.onclick = () => buy(b.dataset.buy));
+    <div class="sec-head"><div><h1>One small monthly pass, priced by your segment</h1>
+      <p>The pass unlocks full company reports and the apply links for ${p.days} days. Prices are set in US dollars and charged in rupees. Pay by UPI, card or netbanking.</p></div>
+      <span class="hint mono">1 USD = ₹${p.fx_rate.toFixed(2)}</span></div>
+    ${need ? `<div class="notice">This job needs the <b>${esc(SEG[need])}</b> pass or higher.</div>` : ''}
+    ${active ? `<div class="notice ok">Your ${esc(SEG[active.segment])} pass is active until <b>${esc(fmtDate(active.expires_at))}</b>.</div>` : ''}
+    ${p.payments === 'demo' ? '<div class="notice bad">Demo mode: no real payment is taken. Add Razorpay keys to go live.</div>' : ''}
+    <div class="plans" id="plans" role="radiogroup" aria-label="Choose a pass">${p.segments.map(s => `
+      <div class="plan" role="radio" tabindex="${s.key === picked ? 0 : -1}" aria-checked="${s.key === picked}" aria-labelledby="pl-${s.key}" data-plan="${s.key}">
+        <div class="top"><h2 id="pl-${s.key}">${esc(s.name)}</h2><span class="radio" aria-hidden="true"></span></div>
+        <div><div class="price"><b>${inr(s.inr)}</b><span>/ ${p.days} days</span></div><div class="hint mono">$${s.usd.toFixed(2)} USD</div></div>
+        <ul><li>Full company background reports</li><li>Hiring history and scam checks</li><li>Apply links to the original job pages</li><li>Application tracking</li></ul>
+        <div class="roles">${esc(s.covers)}</div></div>`).join('')}</div>
+    <div class="card" style="margin-top:16px" id="payCard"></div>`;
+
+  const renderPay = () => {
+    const s = p.segments.find(x => x.key === picked);
+    $('#payCard').innerHTML = `<h2>Get the ${esc(s.name)} pass for ${inr(s.inr)}</h2>
+      <div class="acts" style="align-items:center"><button type="button" class="btn primary" id="buy">Pay ${inr(s.inr)}</button>
+      <span class="hint">${state.user ? `Secure checkout by ${p.payments === 'demo' ? 'demo payment' : 'Razorpay'}. Starts today, lasts ${p.days} days.` : 'You\'ll log in first.'}</span></div>`;
+    $('#buy').addEventListener('click', () => buy(picked));
+  };
+  const select = key => {
+    picked = key;
+    document.querySelectorAll('[data-plan]').forEach(el => { const on = el.dataset.plan === key; el.setAttribute('aria-checked', on); el.tabIndex = on ? 0 : -1; });
+    renderPay();
+  };
+  $('#plans').addEventListener('click', e => { const el = e.target.closest('[data-plan]'); if (el) select(el.dataset.plan); });
+  $('#plans').addEventListener('keydown', e => {
+    const keys = Object.keys(SEG), i = keys.indexOf(picked);
+    const next = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
+    if (next) { e.preventDefault(); select(keys[(i + next + keys.length) % keys.length]); $(`[data-plan="${picked}"]`).focus(); }
+    if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); select(e.target.closest('[data-plan]')?.dataset.plan || picked); }
+  });
+  renderPay();
 }
 
 async function buy(segment) {
-  if (!state.user) return (location.hash = '#/login?next=' + encodeURIComponent('#/pricing'));
-  const msg = (t, ok) => document.getElementById('msg').innerHTML = `<div class="alert ${ok ? 'ok' : 'err'}" role="${ok ? 'status' : 'alert'}">${esc(t)}</div>`;
+  if (!state.user) { location.hash = '#/login?next=' + encodeURIComponent('#/pricing'); return; }
   try {
     const o = await api('/api/checkout', { method: 'POST', body: { segment } });
-    const done = async payload => { await api('/api/checkout/verify', { method: 'POST', body: { subscription_id: o.subscription_id, ...payload } }); await loadMe(); msg('Payment successful! Your plan is active.', true); };
-    if (o.mode === 'demo') {
-      if (confirm(`DEMO payment of ${inr(o.amount_inr)}. Activate plan?`)) await done({});
-      return;
-    }
-    await loadScript('https://checkout.razorpay.com/v1/checkout.js');
-    new Razorpay({
-      key: o.key_id, order_id: o.order_id, amount: o.amount, currency: 'INR', name: 'RemoteCheck', description: o.description,
-      prefill: { name: o.name, email: o.email }, theme: { color: '#4f46e5' },
-      handler: r => done(r).catch(e => msg(e.message)),
-    }).open();
-  } catch (e) { msg(e.message); }
-}
-const loadScript = src => new Promise((ok, fail) => { if (document.querySelector(`script[src="${src}"]`)) return ok(); const s = Object.assign(document.createElement('script'), { src, onload: ok, onerror: fail }); document.head.append(s); });
-
-async function adminPage() {
-  if (!state.user?.is_admin) return ($app.innerHTML = '<div class="card">Admins only. Set ADMIN_EMAIL in .env and sign up with that email.</div>');
-  const [stats, companies, src] = await Promise.all([api('/api/admin/stats'), api('/api/admin/companies'), api('/api/admin/sources')]);
-  $app.innerHTML = `
-    <h1>Admin</h1><div id="msg"></div>
-    <div class="stats card">${Object.entries(stats).map(([k, v]) => `<div class="stat"><b>${v}</b><span class="muted small">${k.replace(/_/g, ' ')}</span></div>`).join('')}</div>
-    <div class="card">
-      <div class="row between"><div><h2 style="margin:0;font-size:18px">Job sources</h2><div class="muted small">Only roles open to India, Asia or worldwide are imported. Runs every 6 hours when AUTO_IMPORT=true.</div></div><button id="imp">Run import now</button></div>
-      <div style="overflow-x:auto"><table><thead><tr><th scope="col">Source</th><th scope="col">Last run</th><th scope="col">Jobs seen</th><th scope="col">New</th><th scope="col">Status</th></tr></thead><tbody>
-      ${[...src.careers, ...src.boards].map(x => `<tr><td>${x.site ? `<a href="${esc(x.site)}" target="_blank" rel="noopener">${esc(x.label)}</a>` : esc(x.label)}</td>
-        <td>${x.last_run ? esc(x.last_run.slice(0, 16)) : 'Never'}</td><td>${x.fetched ?? '–'}</td><td>${x.added ?? '–'}</td>
-        <td>${x.error ? `<span class="badge risky">Failed: ${esc(x.error)}</span>` : x.last_run ? '<span class="badge verified">OK</span>' : '<span class="muted">Not run yet</span>'}</td></tr>`).join('')}
-      </tbody></table></div>
-      <p class="muted small">LinkedIn, Indeed, Naukri and Glassdoor don't offer a public jobs feed and don't allow copying their listings. Add their jobs with "Add job" below, using the original link as the apply URL.</p>
-    </div>
-    <div class="grid">
-      <form class="card" id="cf"><h3 style="margin-top:0">Add / update company</h3>
-        <label>Name</label><input name="name" required><label>Website</label><input name="website" placeholder="https://…">
-        <label>LinkedIn page</label><input name="linkedin_url"><label>Founded year</label><input name="founded_year" type="number">
-        <label>Employees</label><input name="employee_count" type="number"><label>HQ country</label><input name="hq_country">
-        <label>Careers page (Greenhouse, Lever or Ashby)</label><input name="careers_url" type="url" placeholder="https://jobs.lever.co/company">
-        <div class="muted small">Jobs on this page are imported directly from the employer, and marked closed when they come down.</div>
-        <label>About</label><textarea name="description" rows="3"></textarea>
-        <label><input type="checkbox" name="verified_by_admin" style="width:auto"> I verified this company manually</label>
-        <br><button>Save company</button></form>
-      <form class="card" id="jf"><h3 style="margin-top:0">Add job</h3>
-        <label>Company</label><select name="company_id">${companies.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select>
-        <label>Title</label><input name="title" required><label>Category</label><input name="category">
-        <label>Plan segment</label><select name="segment"><option value="">Auto-detect</option><option value="basic">Starter $2</option><option value="pro">Professional $3</option><option value="premium">Senior $4</option></select>
-        <label>Apply URL (LinkedIn / careers page)</label><input name="apply_url" required placeholder="https://www.linkedin.com/jobs/view/…">
-        <label>Location eligibility</label><input name="location" value="Worldwide">
-        <label>Salary min / max (USD/yr)</label><div class="row"><input name="salary_min" type="number" aria-label="Minimum salary, USD per year" style="flex:1"><input name="salary_max" type="number" aria-label="Maximum salary, USD per year" style="flex:1"></div>
-        <label>Tags</label><input name="tags" placeholder="react, node"><label>Description</label><textarea name="description" rows="4"></textarea>
-        <br><button>Add job</button></form>
-    </div>`;
-  const msg = (t, ok) => { document.getElementById('msg').innerHTML = `<div class="alert ${ok ? 'ok' : 'err'}" role="${ok ? 'status' : 'alert'}">${esc(t)}</div>`; scrollTo(0, 0); };
-  document.getElementById('imp').onclick = async e => { e.target.disabled = true; e.target.textContent = 'Importing…'; try { const r = await api('/api/admin/import', { method: 'POST' }); const added = Object.values(r).reduce((n, x) => n + (x.added || 0), 0);
-    const failed = Object.entries(r).filter(([, x]) => x.error).map(([k]) => k); await adminPage();
-    msg(`Import finished: ${added} new job${added === 1 ? '' : 's'}.${failed.length ? ` Failed: ${failed.join(', ')}.` : ''}`, !failed.length); }
-    catch (err) { msg(err.message); e.target.disabled = false; e.target.textContent = 'Run import now'; } };
-  for (const [id, url] of [['cf', '/api/admin/companies'], ['jf', '/api/admin/jobs']]) {
-    const f = document.getElementById(id);
-    f.onsubmit = async e => {
-      e.preventDefault();
-      const body = Object.fromEntries(new FormData(f)); if (id === 'cf') body.verified_by_admin = f.verified_by_admin.checked;
-      try { await api(url, { method: 'POST', body }); msg('Saved', true); f.reset(); if (id === 'cf') adminPage(); } catch (err) { msg(err.message); }
+    const done = async payload => {
+      await api('/api/checkout/verify', { method: 'POST', body: { subscription_id: o.subscription_id, ...payload } });
+      await loadMe(); toast('Payment received. Your pass is active.'); route();
     };
+    if (o.mode === 'demo') { if (confirm(`Demo payment of ${inr(o.amount_inr)}. Activate the pass?`)) await done({}); return; }
+    await loadScript('https://checkout.razorpay.com/v1/checkout.js');
+    new Razorpay({ key: o.key_id, order_id: o.order_id, amount: o.amount, currency: 'INR', name: 'Parakh', description: o.description,
+      prefill: { name: o.name, email: o.email }, theme: { color: '#B05000' }, handler: r => done(r).catch(e => toast(e.message)) }).open();
+  } catch (e) { toast(e.message); }
+}
+const loadScript = src => new Promise((ok, fail) => {
+  if (document.querySelector(`script[src="${src}"]`)) return ok();
+  document.head.append(Object.assign(document.createElement('script'), { src, onload: ok, onerror: fail }));
+});
+
+// ---------- log in / sign up ----------
+function authPage(mode) {
+  const next = params().get('next') || '#/profile';
+  $app.innerHTML = `
+    <form class="card" id="authForm" style="max-width:440px;margin:24px auto">
+      <h1 style="font-size:26px;margin-bottom:6px">${mode === 'login' ? 'Log in' : 'Create your free profile'}</h1>
+      <p class="hint" style="margin-bottom:16px">${mode === 'login' ? 'Welcome back.' : 'Browse verified jobs for free. Pay only when you want to apply.'}</p>
+      <div class="fields">
+        ${mode === 'signup' ? '<div class="field full"><label for="aName">Full name</label><input id="aName" name="name" autocomplete="name" required></div>' : ''}
+        <div class="field full"><label for="aEmail">Email</label><input id="aEmail" name="email" type="email" autocomplete="email" required></div>
+        <div class="field full"><label for="aPass">Password</label><input id="aPass" name="password" type="password" minlength="8" autocomplete="${mode === 'login' ? 'current-password' : 'new-password'}" required aria-describedby="aPassHint">
+          <span class="hint" id="aPassHint">At least 8 characters.</span></div>
+        <div class="field full"><button class="btn primary">${mode === 'login' ? 'Log in' : 'Create account'}</button></div>
+      </div>
+      <p class="hint" style="margin-top:14px">${mode === 'login' ? 'New here? <a href="#/signup">Create an account</a>' : 'Already have an account? <a href="#/login">Log in</a>'}</p>
+    </form>`;
+  const f = $('#authForm');
+  f.addEventListener('submit', async e => {
+    e.preventDefault();
+    try { await api('/api/' + mode, { method: 'POST', body: Object.fromEntries(new FormData(f)) }); await loadMe(); location.hash = next; }
+    catch (err) { toast(err.message); }
+  });
+}
+
+// ---------- profile ----------
+async function profilePage() {
+  if (!state.user) {
+    $app.innerHTML = `<div class="card" style="max-width:520px;margin:24px auto;text-align:center"><h1 style="font-size:26px">Your profile</h1>
+      <p class="hint" style="margin:8px 0 16px">Log in to save your resume, track applications and see your best matches.</p>
+      <div class="acts" style="justify-content:center"><a class="btn primary" href="#/signup">Create an account</a><a class="btn" href="#/login?next=%23%2Fprofile">Log in</a></div></div>`;
+    return;
+  }
+  const u = state.user;
+  const [apps, jobs] = await Promise.all([api('/api/profile/applications'), api('/api/jobs')]);
+  const matches = jobs.jobs.filter(j => j.match >= 40).sort((a, b) => b.match - a.match).slice(0, 5);
+  const hoursOpts = ['Part-time (up to 20 h/week)', 'Full-time (40 h/week)', 'Night shift IST (US hours)'];
+  $app.innerHTML = `
+    <div class="sec-head"><div><h1>Your profile</h1><p>Only you can see this. Your resume is stored privately and used for applications and matching.</p></div></div>
+    <div class="grid2">
+      <form class="card" id="profileForm">
+        <h2>About you</h2>
+        <div class="fields">
+          <div class="field"><label for="pName">Full name</label><input id="pName" name="name" autocomplete="name" value="${esc(u.name)}"></div>
+          <div class="field"><label for="pPhone">Phone</label><input id="pPhone" name="phone" type="tel" autocomplete="tel" value="${esc(u.phone)}"></div>
+          <div class="field"><label for="pRole">Target role</label><input id="pRole" name="target_role" placeholder="e.g. Content marketer" value="${esc(u.target_role)}"></div>
+          <div class="field"><label for="pHours">Hours available</label><select id="pHours" name="hours">${hoursOpts.map(h => `<option${u.hours === h ? ' selected' : ''}>${h}</option>`).join('')}</select></div>
+          <div class="field"><label for="pLinked">LinkedIn URL</label><input id="pLinked" name="linkedin_url" placeholder="linkedin.com/in/your-name" value="${esc(u.linkedin_url)}"></div>
+          <div class="field"><label for="pExp">Years of experience</label><input id="pExp" name="experience_years" type="number" min="0" max="50" value="${u.experience_years || 0}"></div>
+          <div class="field full"><label for="pSkills">Skills, separated by commas</label><input id="pSkills" name="skills" placeholder="english, customer support, zendesk" value="${esc(u.skills)}" aria-describedby="pSkillsHint">
+            <span class="hint" id="pSkillsHint">We use these to match you with jobs.</span></div>
+          ${u.resume_name
+            ? `<div class="file">${stIcon('ok')}<a class="name" href="/api/profile/resume">${esc(u.resume_name)}</a><label class="btn ghost sm" for="pResume">Replace</label></div>`
+            : `<label class="drop" id="drop" for="pResume"><b>Upload your resume</b><span>PDF or Word, up to 5 MB. Drag it here or click. You need one before applying.</span></label>`}
+          <input id="pResume" type="file" accept=".pdf,.doc,.docx" class="sr-only" aria-label="Resume file, PDF or Word, up to 5 MB">
+          <div class="field full"><button class="btn primary" type="submit">Save profile</button></div>
+        </div>
+      </form>
+      <div class="stack">
+        <div class="card"><h2>Your pass</h2>${state.plans.length
+          ? state.plans.map(p => `<p><b>${esc(SEG[p.segment])}</b> · active until ${esc(fmtDate(p.expires_at))}</p>`).join('')
+          : '<p class="hint" style="margin-bottom:12px">No active pass. Reports and apply links are locked.</p><a class="btn sm" href="#/pricing">See plans</a>'}</div>
+        <div class="card"><h2>Applications you started</h2><div class="track">${apps.length ? apps.map(a => `<div>
+            <span><a href="#/job/${a.job_id}">${esc(a.title)}</a><small>${esc(a.company)} · ${esc(fmtDate(a.applied_at))}${a.job_status === 'closed' ? ' · job closed' : ''}</small></span>
+            <select data-app="${a.job_id}" aria-label="Status for ${esc(a.title)}">${['applied', 'interview', 'offer', 'rejected'].map(s =>
+              `<option value="${s}"${a.status === s ? ' selected' : ''}>${s[0].toUpperCase() + s.slice(1)}</option>`).join('')}</select></div>`).join('')
+          : '<p class="hint">Nothing yet. Click Apply on a job and it shows up here.</p>'}</div>
+          <p class="note">Change the status when you hear back.</p></div>
+        <div class="card"><h2>Your best matches</h2>${u.skills ? (matches.length ? `<div class="matches">${matches.map(j => `<div class="match"><span class="fit">${j.match}%</span>
+            <div style="min-width:0"><a href="#/job/${j.id}"><b>${esc(j.title)}</b></a> · ${esc(j.company_name)}<p>${esc(SEG[j.segment])} · ${salary(j)}</p></div></div>`).join('')}</div>`
+            : '<p class="hint">No strong matches right now. New jobs arrive every few hours.</p>')
+          : '<p class="hint">Add your skills to see the jobs that fit you best.</p>'}</div>
+      </div>
+    </div>`;
+
+  const f = $('#profileForm');
+  f.addEventListener('submit', async e => {
+    e.preventDefault();
+    try { state.user = (await api('/api/profile', { method: 'PUT', body: Object.fromEntries(new FormData(f)) })).user; toast('Profile saved.'); profilePage(); }
+    catch (err) { toast(err.message); }
+  });
+  const upload = async file => {
+    if (!file) return;
+    const fd = new FormData(); fd.append('resume', file);
+    try { await api('/api/profile/resume', { method: 'POST', body: fd }); await loadMe(); toast('Resume uploaded.'); profilePage(); }
+    catch (err) { toast(err.message); }
+  };
+  $('#pResume').addEventListener('change', e => upload(e.target.files[0]));
+  const drop = $('#drop');
+  if (drop) {
+    ['dragenter', 'dragover'].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.add('over'); }));
+    ['dragleave', 'drop'].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.remove('over'); }));
+    drop.addEventListener('drop', e => upload(e.dataTransfer.files[0]));
+  }
+  document.querySelectorAll('[data-app]').forEach(s => s.addEventListener('change', async () => {
+    try { await api(`/api/profile/applications/${s.dataset.app}`, { method: 'PUT', body: { status: s.value } }); toast('Status updated.'); }
+    catch (err) { toast(err.message); }
+  }));
+}
+
+// ---------- admin ----------
+async function adminPage() {
+  if (!state.user?.is_admin) { $app.innerHTML = '<div class="card"><h1 style="font-size:24px">Admins only</h1><p class="hint">Set ADMIN_EMAIL on the server and sign up with that email.</p></div>'; return; }
+  const [stats, companies, src, reqs] = await Promise.all([api('/api/admin/stats'), api('/api/admin/companies'), api('/api/admin/sources'), api('/api/admin/check-requests')]);
+  $app.innerHTML = `
+    <div class="sec-head"><div><h1>Admin</h1><p>Job sources, company check requests, and adding companies and jobs by hand.</p></div></div>
+    <div class="card" style="margin-bottom:24px"><div class="stats">${Object.entries(stats).map(([k, v]) =>
+      `<div class="stat"><b>${k === 'revenue_inr' ? inr(v) : v}</b><span class="hint">${k.replace(/_/g, ' ').replace(' inr', '')}</span></div>`).join('')}</div></div>
+    <div class="card" style="margin-bottom:24px">
+      <div class="sec-head" style="margin-bottom:8px"><div><h2>Job sources</h2><p class="hint">Only roles open to India, Asia or worldwide are imported. Runs every 6 hours when AUTO_IMPORT=true.</p></div>
+        <button type="button" class="btn primary" id="imp">Run import now</button></div>
+      <div class="scroll"><table class="admin"><thead><tr><th scope="col">Source</th><th scope="col">Last run</th><th scope="col">Jobs seen</th><th scope="col">New</th><th scope="col">Status</th></tr></thead><tbody>
+        ${[...src.careers, ...src.boards].map(x => `<tr><td>${x.site ? `<a href="${esc(x.site)}" target="_blank" rel="noopener">${esc(x.label)}</a>` : esc(x.label)}</td>
+          <td class="mono">${x.last_run ? esc(x.last_run.slice(0, 16)) : 'Never'}</td><td class="mono">${x.fetched ?? '–'}</td><td class="mono">${x.added ?? '–'}</td>
+          <td>${x.error ? `<span class="pill bad">Failed: ${esc(x.error)}</span>` : x.last_run ? '<span class="pill ok">OK</span>' : '<span class="pill n">Not run yet</span>'}</td></tr>`).join('')}
+      </tbody></table></div>
+      <p class="note">LinkedIn, Indeed, Naukri and Glassdoor don't offer a public jobs feed and don't allow copying their listings. Add their jobs below, using the original link as the apply URL.</p>
+    </div>
+    <div class="card" style="margin-bottom:24px"><h2>Companies people asked us to check</h2>${reqs.length ? `<div class="scroll"><table class="admin"><thead><tr>
+        <th scope="col">Company</th><th scope="col">Website</th><th scope="col">Asked by</th><th scope="col">Status</th><th scope="col"><span class="sr-only">Action</span></th></tr></thead><tbody>
+      ${reqs.map(r => `<tr><td>${esc(r.company)}${r.asks > 1 ? ` <span class="pill warn">${r.asks} asks</span>` : ''}</td><td>${esc(r.website || '–')}</td>
+        <td>${esc(r.requested_by)}<br><span class="hint">${esc(fmtDate(r.created_at))}</span></td><td><span class="pill ${r.status === 'done' ? 'ok' : 'warn'}">${r.status}</span></td>
+        <td>${r.status === 'pending' ? `<button type="button" class="btn sm" data-done="${r.id}">Mark done</button>` : ''}</td></tr>`).join('')}</tbody></table></div>`
+      : '<p class="hint">No requests yet. They come from the "Scan a job" page.</p>'}
+      <p class="note">To add a report: research the company, then add it below with its founding year, size, website and careers page.</p></div>
+    <div class="grid2">
+      <form class="card" id="cf"><h2>Add or update a company</h2><div class="fields">
+        <div class="field full"><label for="cName">Name</label><input id="cName" name="name" required></div>
+        <div class="field"><label for="cWeb">Website</label><input id="cWeb" name="website" type="url" placeholder="https://…"></div>
+        <div class="field"><label for="cLi">LinkedIn page</label><input id="cLi" name="linkedin_url" type="url"></div>
+        <div class="field"><label for="cYear">Founded year</label><input id="cYear" name="founded_year" type="number" min="1800" max="2100"></div>
+        <div class="field"><label for="cSize">Employees</label><input id="cSize" name="employee_count" type="number" min="1"></div>
+        <div class="field"><label for="cHq">HQ country</label><input id="cHq" name="hq_country"></div>
+        <div class="field full"><label for="cCareers">Careers page (Greenhouse, Lever or Ashby)</label><input id="cCareers" name="careers_url" type="url" placeholder="https://jobs.lever.co/company" aria-describedby="cCareersHint">
+          <span class="hint" id="cCareersHint">Jobs here are imported straight from the employer, and marked closed when they come down.</span></div>
+        <div class="field full"><label for="cAbout">About</label><textarea id="cAbout" name="description" style="min-height:80px"></textarea></div>
+        <label class="check field full"><input type="checkbox" name="verified_by_admin"> I checked this company myself</label>
+        <div class="field full"><button class="btn primary">Save company</button></div></div></form>
+      <form class="card" id="jf"><h2>Add a job</h2><div class="fields">
+        <div class="field full"><label for="jCo">Company</label><select id="jCo" name="company_id">${companies.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></div>
+        <div class="field full"><label for="jTitle">Title</label><input id="jTitle" name="title" required></div>
+        <div class="field"><label for="jCat">Category</label><input id="jCat" name="category"></div>
+        <div class="field"><label for="jSeg">Pass needed</label><select id="jSeg" name="segment"><option value="">Decide from the title</option>${Object.entries(SEG).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select></div>
+        <div class="field full"><label for="jUrl">Apply link (LinkedIn or careers page)</label><input id="jUrl" name="apply_url" type="url" required placeholder="https://www.linkedin.com/jobs/view/…"></div>
+        <div class="field"><label for="jLoc">Who can apply</label><input id="jLoc" name="location" value="Worldwide"></div>
+        <div class="field"><label for="jTags">Tags</label><input id="jTags" name="tags" placeholder="react, node"></div>
+        <div class="field"><label for="jMin">Salary from (USD a year)</label><input id="jMin" name="salary_min" type="number" min="0"></div>
+        <div class="field"><label for="jMax">Salary to (USD a year)</label><input id="jMax" name="salary_max" type="number" min="0"></div>
+        <div class="field full"><label for="jDesc">Description</label><textarea id="jDesc" name="description"></textarea></div>
+        <div class="field full"><button class="btn primary">Add job</button></div></div></form>
+    </div>`;
+
+  $('#imp').addEventListener('click', async e => {
+    const b = e.currentTarget; b.disabled = true; b.textContent = 'Importing…';
+    try {
+      const r = await api('/api/admin/import', { method: 'POST' });
+      const added = Object.values(r).reduce((n, x) => n + (x.added || 0), 0), failed = Object.entries(r).filter(([, x]) => x.error).map(([k]) => k);
+      await adminPage();
+      toast(`Import finished: ${added} new job${added === 1 ? '' : 's'}.${failed.length ? ` ${failed.length} source${failed.length === 1 ? '' : 's'} failed.` : ''}`);
+    } catch (err) { toast(err.message); b.disabled = false; b.textContent = 'Run import now'; }
+  });
+  document.querySelectorAll('[data-done]').forEach(b => b.addEventListener('click', async () => {
+    try { await api(`/api/admin/check-requests/${b.dataset.done}/done`, { method: 'POST' }); await adminPage(); toast('Marked done.'); } catch (err) { toast(err.message); }
+  }));
+  for (const [id, url] of [['cf', '/api/admin/companies'], ['jf', '/api/admin/jobs']]) {
+    const f = $('#' + id);
+    f.addEventListener('submit', async e => {
+      e.preventDefault();
+      const body = Object.fromEntries(new FormData(f));
+      if (id === 'cf') body.verified_by_admin = f.verified_by_admin.checked;
+      try { await api(url, { method: 'POST', body }); toast(id === 'cf' ? 'Company saved.' : 'Job added.'); f.reset(); if (id === 'cf') adminPage(); }
+      catch (err) { toast(err.message); }
+    });
   }
 }
 
 // ---------- router ----------
 async function route() {
+  closeCompany();
   const [path] = location.hash.slice(1).split('?');
-  const parts = (path || '/').split('/').filter(Boolean);
+  const [page = '', id] = (path || '/').split('/').filter(Boolean);
+  const key = { '': 'jobs', job: 'jobs', company: 'jobs' }[page] ?? page;
+  renderNav(key);
   try {
-    if (!parts.length) await homePage();
-    else if (parts[0] === 'job') await jobPage(parts[1]);
-    else if (parts[0] === 'company') await companyPage(parts[1]);
-    else if (parts[0] === 'login' || parts[0] === 'signup') authPage(parts[0]);
-    else if (parts[0] === 'profile') await profilePage();
-    else if (parts[0] === 'pricing') await pricingPage();
-    else if (parts[0] === 'admin') await adminPage();
-    else $app.innerHTML = '<div class="card">Page not found</div>';
-  } catch (e) { $app.innerHTML = `<div class="alert err" role="alert">${esc(e.message)}</div>`; }
-  const h = $app.querySelector('h1, h2');
-  document.title = (h ? h.textContent.trim() + ' · ' : '') + 'RemoteCheck';
-  if (route.ran) $app.focus({ preventScroll: true });
+    if (!page) await jobsPage();
+    else if (page === 'job') await jobPage(id);
+    else if (page === 'company') await companyPage(id);
+    else if (page === 'scan') scanPage();
+    else if (page === 'pricing') await pricingPage();
+    else if (page === 'login' || page === 'signup') authPage(page);
+    else if (page === 'profile') await profilePage();
+    else if (page === 'admin') await adminPage();
+    else $app.innerHTML = '<div class="empty"><b>Page not found</b><a href="#/">Go to jobs</a></div>';
+  } catch (e) { $app.innerHTML = `<div class="notice bad" role="alert">${esc(e.message)}</div>`; }
+  const h = $app.querySelector('h1');
+  document.title = (h && page ? h.textContent.trim() + ' · ' : '') + 'Parakh – Verified remote jobs for India';
+  if (route.ran) { $app.focus({ preventScroll: true }); scrollTo(0, 0); }
   route.ran = true;
 }
 
-// Give each <label> a "for" pointing at the field right after it, so clicking the label and screen readers work.
-let labelSeq = 0;
-function linkLabels(root) {
-  for (const label of root.querySelectorAll('label:not([for])')) {
-    if (label.querySelector('input, select, textarea')) continue;
-    const field = label.nextElementSibling;
-    if (!field || !field.matches('input, select, textarea')) continue;
-    field.id ||= `f${++labelSeq}`;
-    label.htmlFor = field.id;
-  }
-}
-new MutationObserver(() => linkLabels($app)).observe($app, { childList: true, subtree: true });
-
 // "Skip to content" moves focus without changing the page address (the address holds the current page).
-document.querySelector('.skip-link')?.addEventListener('click', e => { e.preventDefault(); $app.focus(); });
+document.querySelector('.skip-link').addEventListener('click', e => { e.preventDefault(); $app.focus(); });
 
 window.addEventListener('hashchange', route);
 loadMe().then(route);

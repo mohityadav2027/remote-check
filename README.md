@@ -1,7 +1,7 @@
-# RemoteCheck – verified international remote jobs for India
+# Parakh – verified international remote jobs for India
 
 Job seekers create a profile, upload a resume and browse remote jobs from international companies that **accept candidates from India**.
-Every company gets a **background check** before anyone applies. Applying happens on the **original site** (LinkedIn, Greenhouse, Lever, company careers page). RemoteCheck checks the job, records the application and sends the user to that site.
+Every company gets a **background check** before anyone applies, and anyone can paste a suspicious job message into **Scan a job** to check it for common scam signs. Applying happens on the **original site** (LinkedIn, Greenhouse, Lever, company careers page). Parakh checks the job, records the application and sends the user to that site.
 
 ## Run it
 ```bash
