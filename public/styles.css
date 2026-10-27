@@ -1,0 +1,48 @@
+:root {
+  --bg: #f6f7fb; --card: #fff; --text: #1d2433; --muted: #667085; --line: #e4e7ec;
+  --brand: #4f46e5; --brand-ink: #fff;
+  --ok: #067647; --ok-bg: #dcfae6; --warn: #b54708; --warn-bg: #fef0c7; --bad: #b42318; --bad-bg: #fee4e2;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #0f1218; --card: #171b24; --text: #e6e8ee; --muted: #98a2b3; --line: #2a303c;
+    --ok-bg: #0b3a24; --ok: #6ce9a6; --warn-bg: #4a2a06; --warn: #fdb022; --bad-bg: #4b1410; --bad: #fda29b; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); line-height: 1.5; }
+a { color: var(--brand); text-decoration: none; }
+.topbar { display: flex; justify-content: space-between; align-items: center; padding: 12px 20px; background: var(--card); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 5; flex-wrap: wrap; gap: 8px; }
+.logo { font-weight: 800; font-size: 20px; color: var(--text); } .logo span { color: var(--brand); }
+nav a, nav button { margin-left: 14px; font-size: 14px; }
+main { max-width: 1000px; margin: 0 auto; padding: 20px 16px 60px; }
+.footer { text-align: center; color: var(--muted); font-size: 13px; padding: 20px 16px 40px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px; margin-bottom: 14px; }
+.hero { text-align: center; padding: 24px 0 10px; } .hero h1 { margin: 0 0 6px; font-size: clamp(24px, 4vw, 34px); }
+.muted { color: var(--muted); } .small { font-size: 13px; }
+.row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.between { justify-content: space-between; }
+.grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+input, select, textarea { font: inherit; padding: 9px 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text); width: 100%; }
+label { font-size: 13px; color: var(--muted); display: block; margin: 10px 0 4px; }
+.filters input { flex: 2; min-width: 180px; } .filters select { flex: 1; min-width: 140px; width: auto; }
+button, .btn { font: inherit; cursor: pointer; border: 0; border-radius: 8px; padding: 9px 16px; background: var(--brand); color: var(--brand-ink); font-weight: 600; display: inline-block; }
+button.ghost, .btn.ghost { background: transparent; color: var(--brand); border: 1px solid var(--line); }
+button:disabled { opacity: .5; cursor: default; }
+.job h3 { margin: 0; font-size: 17px; } .job h3 a { color: var(--text); }
+.pill { display: inline-block; font-size: 12px; padding: 2px 9px; border-radius: 99px; background: var(--bg); border: 1px solid var(--line); color: var(--muted); }
+.badge { font-size: 12px; font-weight: 700; padding: 3px 10px; border-radius: 99px; white-space: nowrap; }
+.verified { background: var(--ok-bg); color: var(--ok); } .caution { background: var(--warn-bg); color: var(--warn); } .risky { background: var(--bad-bg); color: var(--bad); }
+.score { font-size: 44px; font-weight: 800; line-height: 1; }
+.signals { list-style: none; padding: 0; margin: 10px 0 0; }
+.signals li { display: flex; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); }
+.signals .imp { font-weight: 700; min-width: 38px; } .plus { color: var(--ok); } .minus { color: var(--bad); } .zero { color: var(--muted); }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin-top: 10px; }
+.stat { background: var(--bg); border-radius: 10px; padding: 10px; } .stat b { font-size: 22px; display: block; }
+.bars { display: flex; align-items: flex-end; gap: 4px; height: 70px; margin-top: 10px; }
+.bars div { flex: 1; background: var(--brand); border-radius: 4px 4px 0 0; min-height: 3px; position: relative; }
+.bars span { position: absolute; bottom: -18px; left: 0; right: 0; text-align: center; font-size: 10px; color: var(--muted); }
+.locked { border: 1px dashed var(--brand); background: color-mix(in srgb, var(--brand) 6%, var(--card)); }
+.price { font-size: 30px; font-weight: 800; } .plan.best { border: 2px solid var(--brand); }
+.alert { padding: 10px 14px; border-radius: 8px; margin-bottom: 12px; } .alert.err { background: var(--bad-bg); color: var(--bad); } .alert.ok { background: var(--ok-bg); color: var(--ok); }
+.desc { white-space: pre-wrap; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; } td, th { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); }
+@media (max-width: 600px) { nav a, nav button { margin-left: 8px; } .score { font-size: 34px; } }

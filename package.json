@@ -1,0 +1,21 @@
+{
+  "name": "remotecheck",
+  "version": "1.0.0",
+  "description": "Verified international remote jobs for Indian job seekers, with company background checks",
+  "main": "server.js",
+  "scripts": {
+    "start": "node --no-warnings server.js",
+    "import": "node --no-warnings lib/importer.js"
+  },
+  "engines": {
+    "node": ">=22.5"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "dotenv": "^18.0.9",
+    "express": "^5.3.0",
+    "express-session": "^1.19.0",
+    "multer": "^2.5.0"
+  }
+}

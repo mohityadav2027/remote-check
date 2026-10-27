@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: remotecheck
+    runtime: docker
+    plan: starter
+    envVars:
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: RAZORPAY_KEY_ID
+        sync: false
+      - key: RAZORPAY_KEY_SECRET
+        sync: false
+      - key: AUTO_IMPORT
+        value: "true"
+    disk:
+      name: data
+      mountPath: /app/data
+      sizeGB: 1
