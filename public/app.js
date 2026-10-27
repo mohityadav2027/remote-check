@@ -6,7 +6,8 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 const inr = n => '₹' + Number(n).toLocaleString('en-IN');
 const ago = d => { const days = Math.floor((Date.now() - Date.parse(d.replace(' ', 'T') + 'Z')) / 864e5); return days <= 0 ? 'today' : days === 1 ? '1 day ago' : `${days} days ago`; };
 const LEVEL = { verified: '✔ Verified', caution: '⚠ Check carefully', risky: '✖ Risky' };
-const badge = (level, score) => `<span class="badge ${level}">${LEVEL[level]}${score != null ? ` · ${score}` : ''}</span>`;
+const LEVEL_TEXT = { verified: 'Verified', caution: 'Check carefully', risky: 'Risky' };
+const badge = (level, score) => `<span class="badge ${level}" role="img" aria-label="${LEVEL_TEXT[level]}${score != null ? `, trust score ${score} out of 100` : ''}">${LEVEL[level]}${score != null ? ` · ${score}` : ''}</span>`;
 const salary = j => j.salary_min ? `$${(j.salary_min / 1000).toFixed(0)}k–$${(j.salary_max / 1000).toFixed(0)}k / yr` : '';
 
 async function api(path, opts = {}) {
@@ -22,7 +23,7 @@ async function loadMe() { Object.assign(state, await api('/api/me')); renderNav(
 function renderNav() {
   const u = state.user;
   document.getElementById('nav').innerHTML = `<a href="#/">Jobs</a><a href="#/pricing">Pricing</a>` +
-    (u ? `${u.is_admin ? '<a href="#/admin">Admin</a>' : ''}<a href="#/profile">My profile</a><a href="#" id="logout">Logout</a>`
+    (u ? `${u.is_admin ? '<a href="#/admin">Admin</a>' : ''}<a href="#/profile">My profile</a><button type="button" class="linklike" id="logout">Logout</button>`
        : `<a href="#/login">Login</a><a href="#/signup" class="btn">Sign up</a>`);
   document.getElementById('logout')?.addEventListener('click', async e => { e.preventDefault(); await api('/api/logout', { method: 'POST' }); await loadMe(); location.hash = '#/'; });
 }
@@ -36,9 +37,9 @@ async function homePage() {
       <p class="muted">Every company is background-checked: founding year, website age, hiring history, repost patterns and scam signals.</p>
     </section>
     <form class="card row filters" id="f">
-      <input name="q" placeholder="Search title, skill or company" value="${esc(params.get('q'))}">
-      <select name="segment"><option value="">All levels</option><option value="basic">Starter (entry / non-tech)</option><option value="pro">Professional</option><option value="premium">Senior / specialist</option></select>
-      <select name="category"><option value="">All categories</option></select>
+      <input name="q" type="search" aria-label="Search jobs" placeholder="Search title, skill or company" value="${esc(params.get('q'))}">
+      <select name="segment" aria-label="Experience level"><option value="">All levels</option><option value="basic">Starter (entry / non-tech)</option><option value="pro">Professional</option><option value="premium">Senior / specialist</option></select>
+      <select name="category" aria-label="Category"><option value="">All categories</option></select>
       <button>Search</button>
     </form>
     <div id="list"><p class="muted">Loading jobs…</p></div>`;
@@ -49,11 +50,11 @@ async function homePage() {
   const data = await api('/api/jobs?' + params.toString());
   f.category.innerHTML += data.categories.map(c => `<option>${esc(c)}</option>`).join('');
   f.category.value = params.get('category') || '';
-  document.getElementById('list').innerHTML = (data.jobs.length ? data.jobs.map(j => `
+  document.getElementById('list').innerHTML = `<p class="muted small" role="status">${data.jobs.length} verified job${data.jobs.length === 1 ? '' : 's'}</p>` + (data.jobs.length ? data.jobs.map(j => `
     <article class="card job">
       <div class="row between">
         <div>
-          <h3><a href="#/job/${j.id}">${esc(j.title)}</a></h3>
+          <h2><a href="#/job/${j.id}">${esc(j.title)}</a></h2>
           <a class="muted" href="#/company/${j.company_id}">${esc(j.company_name)}</a>
         </div>
         ${badge(j.trust_level, j.trust_score)}
@@ -68,6 +69,9 @@ async function homePage() {
       </div>
     </article>`).join('') : '<div class="card muted">No jobs found.</div>') +
     (data.hidden_risky ? `<p class="muted small">🛡 ${data.hidden_risky} job(s) hidden because they failed our background check.</p>` : '');
+  const { sources } = await api('/api/sources');
+  document.getElementById('list').insertAdjacentHTML('beforeend', `<p class="muted small">Jobs collected from ${sources.map(x => x.site
+    ? `<a href="${esc(x.site)}" target="_blank" rel="noopener">${esc(x.label)}</a>` : esc(x.label)).join(', ')}. You always apply on the original listing.</p>`);
 }
 
 function reportCard(report, company) {
@@ -91,7 +95,7 @@ function reportCard(report, company) {
         <div class="stat"><b>${(s.reports?.hired || 0)}</b><span class="muted small">Members hired</span></div>
       </div>
       ${s.monthly?.length ? `<p class="small muted" style="margin:16px 0 0">Jobs posted per month (last 12 months)</p>
-        <div class="bars">${s.monthly.map(m => `<div style="height:${(m.n / max) * 100}%" title="${m.month}: ${m.n}"><span>${m.month.slice(5)}</span></div>`).join('')}</div><br>` : ''}`}
+        <div class="bars" role="img" aria-label="Jobs posted per month: ${s.monthly.map(m => `${m.month} ${m.n}`).join(', ')}">${s.monthly.map(m => `<div style="height:${(m.n / max) * 100}%" title="${m.month}: ${m.n}"><span>${m.month.slice(5)}</span></div>`).join('')}</div><br>` : ''}`}
       <ul class="signals">${report.signals.map(x => `
         <li><span class="imp ${x.impact > 0 ? 'plus' : x.impact < 0 ? 'minus' : 'zero'}">${x.impact > 0 ? '+' : ''}${x.impact}</span>
         <div>${esc(x.label)}${x.detail ? `<div class="muted small">${esc(x.detail)}</div>` : ''}</div></li>`).join('')}</ul>
@@ -126,7 +130,7 @@ async function jobPage(id) {
       ${[['hired', '🎉 I got hired'], ['interview', '💬 Got an interview'], ['no_response', '🕳 No response'], ['scam', '🚩 Report scam']]
         .map(([k, t]) => `<button class="ghost" data-report="${k}">${t}</button>`).join('')}</div></div>` : ''}`;
 
-  const msg = (t, ok) => { document.getElementById('msg').innerHTML = `<div class="alert ${ok ? 'ok' : 'err'}">${t}</div>`; scrollTo(0, 0); };
+  const msg = (t, ok) => { document.getElementById('msg').innerHTML = `<div class="alert ${ok ? 'ok' : 'err'}" role="${ok ? 'status' : 'alert'}">${t}</div>`; scrollTo(0, 0); };
   document.getElementById('apply').onclick = async () => {
     if (!state.user) return (location.hash = '#/login?next=' + encodeURIComponent(location.hash));
     try {
@@ -175,7 +179,7 @@ function authPage(mode) {
   const next = new URLSearchParams(location.hash.split('?')[1] || '').get('next') || '#/profile';
   $app.innerHTML = `
     <form class="card" id="f" style="max-width:420px;margin:30px auto">
-      <h2>${mode === 'login' ? 'Log in' : 'Create your free profile'}</h2>
+      <h1 style="font-size:24px;margin-top:0">${mode === 'login' ? 'Log in' : 'Create your free profile'}</h1>
       <div id="msg"></div>
       ${mode === 'signup' ? '<label>Full name</label><input name="name" required>' : ''}
       <label>Email</label><input name="email" type="email" required>
@@ -187,7 +191,7 @@ function authPage(mode) {
   f.onsubmit = async e => {
     e.preventDefault();
     try { await api('/api/' + mode, { method: 'POST', body: Object.fromEntries(new FormData(f)) }); await loadMe(); location.hash = next; }
-    catch (err) { document.getElementById('msg').innerHTML = `<div class="alert err">${esc(err.message)}</div>`; }
+    catch (err) { document.getElementById('msg').innerHTML = `<div class="alert err" role="alert">${esc(err.message)}</div>`; }
   };
 }
 
@@ -199,7 +203,7 @@ async function profilePage() {
     <div id="msg"></div>
     <div class="grid">
       <form class="card" id="pf">
-        <h2 style="margin-top:0">My profile</h2>
+        <h1 style="margin-top:0;font-size:24px">My profile</h1>
         <label>Name</label><input name="name" value="${esc(u.name)}">
         <label>Phone</label><input name="phone" value="${esc(u.phone)}">
         <label>Headline</label><input name="headline" placeholder="e.g. React developer, 3 yrs" value="${esc(u.headline)}">
@@ -209,22 +213,22 @@ async function profilePage() {
       </form>
       <div>
         <form class="card" id="rf">
-          <h3 style="margin-top:0">Resume</h3>
+          <h2 style="margin-top:0;font-size:18px">Resume</h2>
           ${u.resume_name ? `<p>Current: <a href="/api/profile/resume">${esc(u.resume_name)}</a></p>` : '<p class="muted">No resume yet. You need one before applying.</p>'}
-          <input type="file" name="resume" accept=".pdf,.doc,.docx" required>
+          <input type="file" name="resume" aria-label="Resume file, PDF or Word, up to 5 MB" accept=".pdf,.doc,.docx" required>
           <br><br><button>Upload resume</button>
         </form>
         <div class="card">
-          <h3 style="margin-top:0">My plans</h3>
+          <h2 style="margin-top:0;font-size:18px">My plans</h2>
           ${state.plans.length ? state.plans.map(p => `<p><b>${p.segment.toUpperCase()}</b> – active until ${p.expires_at.slice(0, 10)}</p>`).join('') : '<p class="muted">No active plan.</p>'}
           <a class="btn ghost" href="#/pricing">See plans</a>
         </div>
       </div>
     </div>
-    <div class="card"><h3 style="margin-top:0">My applications</h3>
+    <div class="card"><h2 style="margin-top:0;font-size:18px">My applications</h2>
       ${apps.length ? `<table><tr><th>Job</th><th>Company</th><th>Date</th></tr>${apps.map(a => `<tr><td><a href="#/job/${a.job_id}">${esc(a.title)}</a></td><td>${esc(a.company)}</td><td>${a.applied_at.slice(0, 10)}</td></tr>`).join('')}</table>` : '<p class="muted">You haven\'t applied anywhere yet.</p>'}
     </div>`;
-  const msg = (t, ok) => document.getElementById('msg').innerHTML = `<div class="alert ${ok ? 'ok' : 'err'}">${esc(t)}</div>`;
+  const msg = (t, ok) => document.getElementById('msg').innerHTML = `<div class="alert ${ok ? 'ok' : 'err'}" role="${ok ? 'status' : 'alert'}">${esc(t)}</div>`;
   const pf = document.getElementById('pf');
   pf.onsubmit = async e => { e.preventDefault(); try { state.user = (await api('/api/profile', { method: 'PUT', body: Object.fromEntries(new FormData(pf)) })).user; msg('Profile saved', true); } catch (err) { msg(err.message); } };
   const rf = document.getElementById('rf');
@@ -237,13 +241,13 @@ async function pricingPage() {
   $app.innerHTML = `
     <section class="hero"><h1>Simple monthly plans</h1>
       <p class="muted">Pay once for ${p.days} days. Prices in USD converted to INR at today's rate (1 USD = ₹${p.fx_rate.toFixed(2)}).</p>
-      ${need ? `<div class="alert err">This job needs the <b>${esc(p.segments.find(s => s.key === need)?.name)}</b> plan or higher.</div>` : ''}
+      ${need ? `<div class="alert err" role="alert">This job needs the <b>${esc(p.segments.find(s => s.key === need)?.name)}</b> plan or higher.</div>` : ''}
       ${p.payments === 'demo' ? '<div class="alert err small">DEMO MODE: no real payment is taken. Add Razorpay keys in .env to go live.</div>' : ''}
     </section>
     <div id="msg"></div>
     <div class="grid">${p.segments.map(s => `
       <div class="card plan ${s.key === (need || 'pro') ? 'best' : ''}">
-        <h3 style="margin:0">${esc(s.name)}</h3>
+        <h2 style="margin:0;font-size:18px">${esc(s.name)}</h2>
         <div class="price">${inr(s.inr)}</div><div class="muted small">≈ $${s.usd} · ${p.days} days</div>
         <p>${esc(s.covers)}</p>
         <ul class="small"><li>Full company background reports</li><li>Hiring history & scam signals</li><li>Apply links to original job pages</li><li>Application tracking</li></ul>
@@ -254,7 +258,7 @@ async function pricingPage() {
 
 async function buy(segment) {
   if (!state.user) return (location.hash = '#/login?next=' + encodeURIComponent('#/pricing'));
-  const msg = (t, ok) => document.getElementById('msg').innerHTML = `<div class="alert ${ok ? 'ok' : 'err'}">${esc(t)}</div>`;
+  const msg = (t, ok) => document.getElementById('msg').innerHTML = `<div class="alert ${ok ? 'ok' : 'err'}" role="${ok ? 'status' : 'alert'}">${esc(t)}</div>`;
   try {
     const o = await api('/api/checkout', { method: 'POST', body: { segment } });
     const done = async payload => { await api('/api/checkout/verify', { method: 'POST', body: { subscription_id: o.subscription_id, ...payload } }); await loadMe(); msg('Payment successful! Your plan is active.', true); };
@@ -274,16 +278,26 @@ const loadScript = src => new Promise((ok, fail) => { if (document.querySelector
 
 async function adminPage() {
   if (!state.user?.is_admin) return ($app.innerHTML = '<div class="card">Admins only. Set ADMIN_EMAIL in .env and sign up with that email.</div>');
-  const [stats, companies] = await Promise.all([api('/api/admin/stats'), api('/api/admin/companies')]);
+  const [stats, companies, src] = await Promise.all([api('/api/admin/stats'), api('/api/admin/companies'), api('/api/admin/sources')]);
   $app.innerHTML = `
     <h1>Admin</h1><div id="msg"></div>
     <div class="stats card">${Object.entries(stats).map(([k, v]) => `<div class="stat"><b>${v}</b><span class="muted small">${k.replace(/_/g, ' ')}</span></div>`).join('')}</div>
-    <div class="card row between"><div><b>Import real remote jobs</b><div class="muted small">From Remotive + Himalayas, only roles open to India/worldwide.</div></div><button id="imp">Run import</button></div>
+    <div class="card">
+      <div class="row between"><div><h2 style="margin:0;font-size:18px">Job sources</h2><div class="muted small">Only roles open to India, Asia or worldwide are imported. Runs every 6 hours when AUTO_IMPORT=true.</div></div><button id="imp">Run import now</button></div>
+      <div style="overflow-x:auto"><table><thead><tr><th scope="col">Source</th><th scope="col">Last run</th><th scope="col">Jobs seen</th><th scope="col">New</th><th scope="col">Status</th></tr></thead><tbody>
+      ${[...src.careers, ...src.boards].map(x => `<tr><td>${x.site ? `<a href="${esc(x.site)}" target="_blank" rel="noopener">${esc(x.label)}</a>` : esc(x.label)}</td>
+        <td>${x.last_run ? esc(x.last_run.slice(0, 16)) : 'Never'}</td><td>${x.fetched ?? '–'}</td><td>${x.added ?? '–'}</td>
+        <td>${x.error ? `<span class="badge risky">Failed: ${esc(x.error)}</span>` : x.last_run ? '<span class="badge verified">OK</span>' : '<span class="muted">Not run yet</span>'}</td></tr>`).join('')}
+      </tbody></table></div>
+      <p class="muted small">LinkedIn, Indeed, Naukri and Glassdoor don't offer a public jobs feed and don't allow copying their listings. Add their jobs with "Add job" below, using the original link as the apply URL.</p>
+    </div>
     <div class="grid">
       <form class="card" id="cf"><h3 style="margin-top:0">Add / update company</h3>
         <label>Name</label><input name="name" required><label>Website</label><input name="website" placeholder="https://…">
         <label>LinkedIn page</label><input name="linkedin_url"><label>Founded year</label><input name="founded_year" type="number">
         <label>Employees</label><input name="employee_count" type="number"><label>HQ country</label><input name="hq_country">
+        <label>Careers page (Greenhouse, Lever or Ashby)</label><input name="careers_url" type="url" placeholder="https://jobs.lever.co/company">
+        <div class="muted small">Jobs on this page are imported directly from the employer, and marked closed when they come down.</div>
         <label>About</label><textarea name="description" rows="3"></textarea>
         <label><input type="checkbox" name="verified_by_admin" style="width:auto"> I verified this company manually</label>
         <br><button>Save company</button></form>
@@ -293,12 +307,15 @@ async function adminPage() {
         <label>Plan segment</label><select name="segment"><option value="">Auto-detect</option><option value="basic">Starter $2</option><option value="pro">Professional $3</option><option value="premium">Senior $4</option></select>
         <label>Apply URL (LinkedIn / careers page)</label><input name="apply_url" required placeholder="https://www.linkedin.com/jobs/view/…">
         <label>Location eligibility</label><input name="location" value="Worldwide">
-        <label>Salary min / max (USD/yr)</label><div class="row"><input name="salary_min" type="number" style="flex:1"><input name="salary_max" type="number" style="flex:1"></div>
+        <label>Salary min / max (USD/yr)</label><div class="row"><input name="salary_min" type="number" aria-label="Minimum salary, USD per year" style="flex:1"><input name="salary_max" type="number" aria-label="Maximum salary, USD per year" style="flex:1"></div>
         <label>Tags</label><input name="tags" placeholder="react, node"><label>Description</label><textarea name="description" rows="4"></textarea>
         <br><button>Add job</button></form>
     </div>`;
-  const msg = (t, ok) => { document.getElementById('msg').innerHTML = `<div class="alert ${ok ? 'ok' : 'err'}">${esc(t)}</div>`; scrollTo(0, 0); };
-  document.getElementById('imp').onclick = async e => { e.target.disabled = true; e.target.textContent = 'Importing…'; try { msg('Import result: ' + JSON.stringify(await api('/api/admin/import', { method: 'POST' })), true); } catch (err) { msg(err.message); } e.target.disabled = false; e.target.textContent = 'Run import'; };
+  const msg = (t, ok) => { document.getElementById('msg').innerHTML = `<div class="alert ${ok ? 'ok' : 'err'}" role="${ok ? 'status' : 'alert'}">${esc(t)}</div>`; scrollTo(0, 0); };
+  document.getElementById('imp').onclick = async e => { e.target.disabled = true; e.target.textContent = 'Importing…'; try { const r = await api('/api/admin/import', { method: 'POST' }); const added = Object.values(r).reduce((n, x) => n + (x.added || 0), 0);
+    const failed = Object.entries(r).filter(([, x]) => x.error).map(([k]) => k); await adminPage();
+    msg(`Import finished: ${added} new job${added === 1 ? '' : 's'}.${failed.length ? ` Failed: ${failed.join(', ')}.` : ''}`, !failed.length); }
+    catch (err) { msg(err.message); e.target.disabled = false; e.target.textContent = 'Run import now'; } };
   for (const [id, url] of [['cf', '/api/admin/companies'], ['jf', '/api/admin/jobs']]) {
     const f = document.getElementById(id);
     f.onsubmit = async e => {
@@ -322,7 +339,28 @@ async function route() {
     else if (parts[0] === 'pricing') await pricingPage();
     else if (parts[0] === 'admin') await adminPage();
     else $app.innerHTML = '<div class="card">Page not found</div>';
-  } catch (e) { $app.innerHTML = `<div class="alert err">${esc(e.message)}</div>`; }
+  } catch (e) { $app.innerHTML = `<div class="alert err" role="alert">${esc(e.message)}</div>`; }
+  const h = $app.querySelector('h1, h2');
+  document.title = (h ? h.textContent.trim() + ' · ' : '') + 'RemoteCheck';
+  if (route.ran) $app.focus({ preventScroll: true });
+  route.ran = true;
 }
+
+// Give each <label> a "for" pointing at the field right after it, so clicking the label and screen readers work.
+let labelSeq = 0;
+function linkLabels(root) {
+  for (const label of root.querySelectorAll('label:not([for])')) {
+    if (label.querySelector('input, select, textarea')) continue;
+    const field = label.nextElementSibling;
+    if (!field || !field.matches('input, select, textarea')) continue;
+    field.id ||= `f${++labelSeq}`;
+    label.htmlFor = field.id;
+  }
+}
+new MutationObserver(() => linkLabels($app)).observe($app, { childList: true, subtree: true });
+
+// "Skip to content" moves focus without changing the page address (the address holds the current page).
+document.querySelector('.skip-link')?.addEventListener('click', e => { e.preventDefault(); $app.focus(); });
+
 window.addEventListener('hashchange', route);
 loadMe().then(route);

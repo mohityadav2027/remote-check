@@ -13,6 +13,7 @@ const { SEGMENTS, PLAN_DAYS, priceList, classifySegment, planCovers } = require(
 const { scoreCompany, refreshDomainAge } = require('./lib/verify');
 const payments = require('./lib/payments');
 const { runImport } = require('./lib/importer');
+const { BOARDS, parseCareersUrl } = require('./lib/sources');
 
 // Sample (fictional) data only for local development; production starts empty and imports real jobs.
 if (process.env.NODE_ENV !== 'production' || process.env.SEED_SAMPLE === 'true') seed();
@@ -229,12 +230,15 @@ app.get('/api/admin/companies', admin, (req, res) => res.json(db.prepare('SELECT
 app.post('/api/admin/companies', admin, ah(async (req, res) => {
   const b = req.body || {};
   if (!b.name) return res.status(400).json({ error: 'Name required' });
-  db.prepare(`INSERT INTO companies (name, website, linkedin_url, founded_year, employee_count, hq_country, description, verified_by_admin)
-    VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(name) DO UPDATE SET website=excluded.website, linkedin_url=excluded.linkedin_url,
+  const careers = b.careers_url ? parseCareersUrl(b.careers_url) : null;
+  if (b.careers_url && !careers) return res.status(400).json({ error: 'Careers link must be a Greenhouse, Lever or Ashby job board, e.g. https://jobs.lever.co/company' });
+  db.prepare(`INSERT INTO companies (name, website, linkedin_url, founded_year, employee_count, hq_country, description, verified_by_admin, ats_type, ats_board)
+    VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(name) DO UPDATE SET website=excluded.website, linkedin_url=excluded.linkedin_url,
     founded_year=excluded.founded_year, employee_count=excluded.employee_count, hq_country=excluded.hq_country,
-    description=excluded.description, verified_by_admin=excluded.verified_by_admin`)
+    description=excluded.description, verified_by_admin=excluded.verified_by_admin,
+    ats_type=COALESCE(excluded.ats_type, companies.ats_type), ats_board=COALESCE(excluded.ats_board, companies.ats_board)`)
     .run(b.name.trim(), b.website || null, b.linkedin_url || null, Number(b.founded_year) || null, Number(b.employee_count) || null,
-      b.hq_country || null, b.description || null, b.verified_by_admin ? 1 : 0);
+      b.hq_country || null, b.description || null, b.verified_by_admin ? 1 : 0, careers?.type || null, careers?.board || null);
   const c = await refreshDomainAge({ ...db.prepare('SELECT * FROM companies WHERE name=?').get(b.name.trim()), domain_checked_at: null });
   res.json({ company: c });
 }));
@@ -254,6 +258,25 @@ app.post('/api/admin/jobs/:id/close', admin, (req, res) => {
 });
 
 app.post('/api/admin/import', admin, ah(async (req, res) => res.json(await runImport())));
+
+// Status of every job source: last run, how many jobs it had, how many were new, and any error.
+app.get('/api/admin/sources', admin, (req, res) => {
+  const status = Object.fromEntries(db.prepare('SELECT * FROM source_status').all().map(r => [r.source, r]));
+  const boards = BOARDS.map(b => ({ source: b.key, label: b.label, site: b.site, ...status[b.key] }));
+  const careers = db.prepare(`SELECT name, ats_type, ats_board FROM companies WHERE ats_type IS NOT NULL`).all()
+    .map(c => ({ source: `${c.ats_type}:${c.ats_board}`, label: `${c.name} careers page`, ...status[`${c.ats_type}:${c.ats_board}`] }));
+  res.json({ boards, careers });
+});
+
+// Public list of where jobs come from (shown on the home page)
+app.get('/api/sources', (req, res) => {
+  const counts = Object.fromEntries(db.prepare(`SELECT source, COUNT(*) n FROM jobs WHERE status='open' GROUP BY source`).all().map(r => [r.source, r.n]));
+  const careerJobs = Object.entries(counts).filter(([k]) => k.includes(':')).reduce((s, [, n]) => s + n, 0);
+  res.json({
+    sources: [...BOARDS.map(b => ({ label: b.label, site: b.site, open: counts[b.key] || 0 })),
+      { label: 'Company careers pages', site: null, open: careerJobs }, { label: 'Added by our team', site: null, open: counts.manual || 0 }],
+  });
+});
 
 app.get('/api/admin/stats', admin, (req, res) => {
   const one = sql => db.prepare(sql).get();

@@ -37,9 +37,24 @@ Prices are converted to INR using the live USD→INR rate. If that rate can't be
 
 Payments go through **Razorpay** (UPI, cards, netbanking). If no Razorpay keys are set, the app runs in **DEMO mode** and payments are simulated. Demo payments are refused when `NODE_ENV=production`.
 
-## Job sources (`lib/importer.js`)
-Free public APIs: **Remotive** and **Himalayas**. Only jobs marked Worldwide, Anywhere, India, Asia or APAC are imported.
-LinkedIn has no public jobs API and does not allow scraping. To list a LinkedIn job, add it from the Admin page with its LinkedIn URL as the apply link.
+## Job sources (`lib/sources.js`, `lib/importer.js`)
+| Source | Type | How we read it |
+|---|---|---|
+| Company careers pages on **Greenhouse, Lever, Ashby** | Direct from the employer | Public job-board API. Paste the careers link in Admin → Add company |
+| **Remotive** | Remote job board | JSON API |
+| **Himalayas** | Remote job board | JSON API |
+| **Remote OK** | Remote job board | JSON API (we credit and link back to them) |
+| **Jobicy** | Remote job board | JSON API |
+| **Working Nomads** | Remote job board | JSON API |
+| **We Work Remotely** | Remote job board | RSS feed |
+
+- Only jobs whose location says India, Asia/APAC, worldwide or anywhere are imported.
+- Careers pages are imported first. When the same job is on a board too, the employer's own listing is kept, and it is counted once (so it doesn't look like a reposted "ghost job").
+- A job that disappears from a careers page is marked closed. That feeds the "openings filled/closed" number in the background check.
+- Admin → Job sources shows when each source last ran, how many jobs it had, and any error.
+- **LinkedIn, Indeed, Naukri and Glassdoor** have no public jobs feed and their terms forbid scraping. Add those jobs from Admin → Add job with the original link as the apply URL.
+
+Tests: `npm test` checks every source against sample responses, so it runs without internet.
 
 ## Before going live
 - Set a strong `SESSION_SECRET` and `NODE_ENV=production`, and serve over HTTPS.
