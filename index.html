@@ -1,0 +1,508 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="Preview of RemoteCheck: verified international remote jobs for Indian candidates.">
+<title>RemoteCheck</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>body{margin:0}:root {
+</head>
+<body>
+  --bg: #f6f7fb; --card: #fff; --text: #1d2433; --muted: #667085; --line: #e4e7ec;
+  --brand: #4f46e5; --brand-ink: #fff;
+  --ok: #067647; --ok-bg: #dcfae6; --warn: #b54708; --warn-bg: #fef0c7; --bad: #b42318; --bad-bg: #fee4e2;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #0f1218; --card: #171b24; --text: #e6e8ee; --muted: #98a2b3; --line: #2a303c;
+    --ok-bg: #0b3a24; --ok: #6ce9a6; --warn-bg: #4a2a06; --warn: #fdb022; --bad-bg: #4b1410; --bad: #fda29b;  color-scheme: dark; } }
+:root[data-theme="dark"] { --bg: #0f1218; --card: #171b24; --text: #e6e8ee; --muted: #98a2b3; --line: #2a303c;
+    --ok-bg: #0b3a24; --ok: #6ce9a6; --warn-bg: #4a2a06; --warn: #fdb022; --bad-bg: #4b1410; --bad: #fda29b;  color-scheme: dark; }
+* { box-sizing: border-box; }
+body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); line-height: 1.5; }
+a { color: var(--brand); text-decoration: none; }
+.topbar { display: flex; justify-content: space-between; align-items: center; padding: 12px 20px; background: var(--card); border-bottom: 1px solid var(--line); position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; flex-wrap: wrap; gap: 8px; }
+.logo { font-weight: 800; font-size: 20px; color: var(--text); } .logo span { color: var(--brand); }
+nav a, nav button { margin-left: 14px; font-size: 14px; }
+main { max-width: 1000px; margin: 0 auto; padding: 20px 16px 60px; }
+.footer { text-align: center; color: var(--muted); font-size: 13px; padding: 20px 16px 40px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px; margin-bottom: 14px; }
+.hero { text-align: center; padding: 24px 0 10px; } .hero h1 { margin: 0 0 6px; font-size: clamp(24px, 4vw, 34px); }
+.muted { color: var(--muted); } .small { font-size: 13px; }
+.row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.between { justify-content: space-between; }
+.grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+input, select, textarea { font: inherit; padding: 9px 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text); width: 100%; }
+label { font-size: 13px; color: var(--muted); display: block; margin: 10px 0 4px; }
+.filters input { flex: 2; min-width: 180px; } .filters select { flex: 1; min-width: 140px; width: auto; }
+button, .btn { font: inherit; cursor: pointer; border: 0; border-radius: 8px; padding: 9px 16px; background: var(--brand); color: var(--brand-ink); font-weight: 600; display: inline-block; }
+button.ghost, .btn.ghost { background: transparent; color: var(--brand); border: 1px solid var(--line); }
+button:disabled { opacity: .5; cursor: default; }
+.job h3 { margin: 0; font-size: 17px; } .job h3 a { color: var(--text); }
+.pill { display: inline-block; font-size: 12px; padding: 2px 9px; border-radius: 99px; background: var(--bg); border: 1px solid var(--line); color: var(--muted); }
+.badge { font-size: 12px; font-weight: 700; padding: 3px 10px; border-radius: 99px; white-space: nowrap; }
+.verified { background: var(--ok-bg); color: var(--ok); } .caution { background: var(--warn-bg); color: var(--warn); } .risky { background: var(--bad-bg); color: var(--bad); }
+.score { font-size: 44px; font-weight: 800; line-height: 1; }
+.signals { list-style: none; padding: 0; margin: 10px 0 0; }
+.signals li { display: flex; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); }
+.signals .imp { font-weight: 700; min-width: 38px; } .plus { color: var(--ok); } .minus { color: var(--bad); } .zero { color: var(--muted); }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin-top: 10px; }
+.stat { background: var(--bg); border-radius: 10px; padding: 10px; } .stat b { font-size: 22px; display: block; }
+.bars { display: flex; align-items: flex-end; gap: 4px; height: 70px; margin-top: 10px; }
+.bars div { flex: 1; background: var(--brand); border-radius: 4px 4px 0 0; min-height: 3px; position: relative; }
+.bars span { position: absolute; bottom: -18px; left: 0; right: 0; text-align: center; font-size: 10px; color: var(--muted); }
+.locked { border: 1px dashed var(--brand); background: color-mix(in srgb, var(--brand) 6%, var(--card)); }
+.price { font-size: 30px; font-weight: 800; } .plan.best { border: 2px solid var(--brand); }
+.alert { padding: 10px 14px; border-radius: 8px; margin-bottom: 12px; } .alert.err { background: var(--bad-bg); color: var(--bad); } .alert.ok { background: var(--ok-bg); color: var(--ok); }
+.desc { white-space: pre-wrap; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; } td, th { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); }
+@media (max-width: 600px) { nav a, nav button { margin-left: 8px; } .score { font-size: 34px; } }
+
+main, .topbar, .footer { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--card); }
+.preview-bar { background: var(--warn-bg); color: var(--warn); font-size: 13px; text-align: center; padding-block: 8px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.modal { position: fixed; inset: 0; background: rgb(0 0 0 / .45); display: grid; place-items: center; padding: 16px; z-index: 20; }
+.modal .card { max-width: 420px; width: 100%; margin: 0; }
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.job, .card { min-width: 0; } .stats { overflow-wrap: anywhere; }
+</style>
+<div class="preview-bar">Preview with sample companies. Logins, resume upload and payments are simulated and nothing is saved.</div>
+
+  <header class="topbar">
+    <a href="#/" class="logo">Remote<span>Check</span></a>
+    <nav id="nav"></nav>
+  </header>
+  <main id="app"><p class="muted">Loading…</p></main>
+  <footer class="footer">
+    We never ask for money to get you a job. Applications are submitted on the employer's original site (LinkedIn, Greenhouse, Lever, company careers page).
+  </footer>
+  
+<script>const DATA = {"jobs":[{"id":6,"company_id":3,"title":"Data Entry - Earn $300 per day","segment":"pro","category":"Data Entry","salary_min":100000,"salary_max":120000,"salary_currency":"USD","location":"Anywhere","india_eligible":1,"source":"manual","external_id":null,"tags":"data entry","posted_at":"2026-10-25 05:51:12","status":"open","closed_at":null,"created_at":"2026-10-27 05:51:12","company_name":"QuickEarn Global (sample)","snippet":"No interview needed! Earn $300 per day. Pay a small refundable registration fee and contact us on WhatsApp. Email quickearn.hr@gmail.com","trust_score":0,"trust_level":"risky","match":null},{"id":1,"company_id":1,"title":"Senior Backend Engineer (Node.js)","segment":"premium","category":"Software Development","salary_min":60000,"salary_max":90000,"salary_currency":"USD","location":"Worldwide","india_eligible":1,"source":"manual","external_id":null,"tags":"node,postgresql,aws","posted_at":"2026-10-24 05:51:12","status":"open","closed_at":null,"created_at":"2026-10-27 05:51:12","company_name":"Northwind Cloud (sample)","snippet":"Build APIs for our cloud platform. 5+ years Node.js, PostgreSQL, AWS. Fully remote, open to candidates in India (IST overlap 4h).","trust_score":100,"trust_level":"verified","match":null},{"id":4,"company_id":2,"title":"Online English Tutor (part-time)","segment":"basic","category":"Teaching","salary_min":6000,"salary_max":12000,"salary_currency":"USD","location":"Worldwide","india_eligible":1,"source":"manual","external_id":null,"tags":"teaching,english,part-time","posted_at":"2026-10-22 05:51:12","status":"open","closed_at":null,"created_at":"2026-10-27 05:51:12","company_name":"Brightpath Learning (sample)","snippet":"Teach English to students online, 10–20 hrs/week, flexible hours. Paid hourly via Payoneer/Wise.","trust_score":93,"trust_level":"verified","match":null},{"id":2,"company_id":1,"title":"Customer Support Specialist","segment":"basic","category":"Customer Service","salary_min":9000,"salary_max":14000,"salary_currency":"USD","location":"APAC, India","india_eligible":1,"source":"manual","external_id":null,"tags":"support,english,zendesk","posted_at":"2026-10-17 05:51:12","status":"open","closed_at":null,"created_at":"2026-10-27 05:51:12","company_name":"Northwind Cloud (sample)","snippet":"Help customers over chat and email. Excellent written English. Night shift for US hours, remote from India.","trust_score":100,"trust_level":"verified","match":null},{"id":5,"company_id":2,"title":"Content Writer","segment":"basic","category":"Writing","salary_min":5000,"salary_max":10000,"salary_currency":"USD","location":"Anywhere","india_eligible":1,"source":"manual","external_id":null,"tags":"writing,seo","posted_at":"2026-10-07 05:51:12","status":"open","closed_at":null,"created_at":"2026-10-27 05:51:12","company_name":"Brightpath Learning (sample)","snippet":"Write educational blog posts. Part-time, paid per article.","trust_score":93,"trust_level":"verified","match":null},{"id":3,"company_id":1,"title":"UI/UX Designer","segment":"pro","category":"Design","salary_min":30000,"salary_max":50000,"salary_currency":"USD","location":"Worldwide","india_eligible":1,"source":"manual","external_id":null,"tags":"figma,ux","posted_at":"2026-09-17 05:51:12","status":"open","closed_at":null,"created_at":"2026-10-27 05:51:12","company_name":"Northwind Cloud (sample)","snippet":"Design dashboards in Figma. Portfolio required.","trust_score":100,"trust_level":"verified","match":null}],"pricing":{"fx_rate":84,"fx_source":"fallback","days":30,"segments":[{"key":"basic","name":"Starter","usd":2,"rank":1,"covers":"Entry-level & non-tech: customer support, data entry, virtual assistant, content writing, tutoring","inr":168},{"key":"pro","name":"Professional","usd":3,"rank":2,"covers":"Everything in Starter + software, design, marketing, sales, finance, QA, product roles","inr":252},{"key":"premium","name":"Senior / Specialist","usd":4,"rank":3,"covers":"Everything + senior, lead, manager, architect, AI/ML, data science, DevOps, security roles","inr":336}],"payments":"demo"},"job":{"1":{"locked":{"score":100,"level":"verified","locked":true,"signals":[{"impact":12,"label":"Founded 2012","detail":"14 years in business"},{"impact":12,"label":"Website domain registered 1995-08-14","detail":"31 years old"}],"hidden_signals":6,"stats":{"posted90":4}},"unlocked":{"score":100,"level":"verified","signals":[{"impact":12,"label":"Founded 2012","detail":"14 years in business"},{"impact":12,"label":"Website domain registered 1995-08-14","detail":"31 years old"},{"impact":8,"label":"420+ employees","detail":""},{"impact":5,"label":"Has LinkedIn company page","detail":""},{"impact":15,"label":"Manually verified by our team","detail":""},{"impact":6,"label":"Actively hiring: 4 jobs in last 90 days","detail":""},{"impact":5,"label":"4 past openings closed/filled","detail":""},{"impact":5,"label":"Apply link goes to boards.greenhouse.io","detail":"Known job board or the company's own site"}],"stats":{"posted30":2,"posted90":4,"posted365":7,"open":3,"closed":4,"avgDaysOpen":25,"staleOpen":0,"reposts":[],"reports":{},"monthly":[{"month":"2025-12","n":1},{"month":"2026-04","n":1},{"month":"2026-06","n":1},{"month":"2026-08","n":1},{"month":"2026-09","n":1},{"month":"2026-10","n":2}]}},"job":{"id":1,"company_id":1,"title":"Senior Backend Engineer (Node.js)","segment":"premium","category":"Software Development","description":"Build APIs for our cloud platform. 5+ years Node.js, PostgreSQL, AWS. Fully remote, open to candidates in India (IST overlap 4h).","salary_min":60000,"salary_max":90000,"salary_currency":"USD","location":"Worldwide","india_eligible":1,"source":"manual","external_id":null,"tags":"node,postgresql,aws","posted_at":"2026-10-24 05:51:12","status":"open","closed_at":null,"created_at":"2026-10-27 05:51:12","apply_host":"boards.greenhouse.io","match":null},"company":{"id":1,"name":"Northwind Cloud (sample)","website":"https://example.com","linkedin_url":"https://www.linkedin.com/company/example","founded_year":2012,"employee_count":420,"hq_country":"USA","description":"B2B cloud software company with a fully remote team across 30 countries.","domain_created":"1995-08-14","domain_checked_at":"2026-10-27 05:51:12","verified_by_admin":1,"created_at":"2026-10-27 05:51:12"},"segment":{"key":"premium","name":"Senior / Specialist","usd":4,"rank":3,"covers":"Everything + senior, lead, manager, architect, AI/ML, data science, DevOps, security roles"}},"2":{"locked":{"score":100,"level":"verified","locked":true,"signals":[{"impact":12,"label":"Founded 2012","detail":"14 years in business"},{"impact":12,"label":"Website domain registered 1995-08-14","detail":"31 years old"}],"hidden_signals":6,"stats":{"posted90":4}},"unlocked":{"score":100,"level":"verified","signals":[{"impact":12,"label":"Founded 2012","detail":"14 years in business"},{"impact":12,"label":"Website domain registered 1995-08-14","detail":"31 years old"},{"impact":8,"label":"420+ employees","detail":""},{"impact":5,"label":"Has LinkedIn company page","detail":""},{"impact":15,"label":"Manually verified by our team","detail":""},{"impact":6,"label":"Actively hiring: 4 jobs in last 90 days","detail":""},{"impact":5,"label":"4 past openings closed/filled","detail":""},{"impact":5,"label":"Apply link goes to jobs.lever.co","detail":"Known job board or the company's own site"}],"stats":{"posted30":2,"posted90":4,"posted365":7,"open":3,"closed":4,"avgDaysOpen":25,"staleOpen":0,"reposts":[],"reports":{},"monthly":[{"month":"2025-12","n":1},{"month":"2026-04","n":1},{"month":"2026-06","n":1},{"month":"2026-08","n":1},{"month":"2026-09","n":1},{"month":"2026-10","n":2}]}},"job":{"id":2,"company_id":1,"title":"Customer Support Specialist","segment":"basic","category":"Customer Service","description":"Help customers over chat and email. Excellent written English. Night shift for US hours, remote from India.","salary_min":9000,"salary_max":14000,"salary_currency":"USD","location":"APAC, India","india_eligible":1,"source":"manual","external_id":null,"tags":"support,english,zendesk","posted_at":"2026-10-17 05:51:12","status":"open","closed_at":null,"created_at":"2026-10-27 05:51:12","apply_host":"jobs.lever.co","match":null},"company":{"id":1,"name":"Northwind Cloud (sample)","website":"https://example.com","linkedin_url":"https://www.linkedin.com/company/example","founded_year":2012,"employee_count":420,"hq_country":"USA","description":"B2B cloud software company with a fully remote team across 30 countries.","domain_created":"1995-08-14","domain_checked_at":"2026-10-27 05:51:12","verified_by_admin":1,"created_at":"2026-10-27 05:51:12"},"segment":{"key":"basic","name":"Starter","usd":2,"rank":1,"covers":"Entry-level & non-tech: customer support, data entry, virtual assistant, content writing, tutoring"}},"3":{"locked":{"score":100,"level":"verified","locked":true,"signals":[{"impact":12,"label":"Founded 2012","detail":"14 years in business"},{"impact":12,"label":"Website domain registered 1995-08-14","detail":"31 years old"}],"hidden_signals":6,"stats":{"posted90":4}},"unlocked":{"score":100,"level":"verified","signals":[{"impact":12,"label":"Founded 2012","detail":"14 years in business"},{"impact":12,"label":"Website domain registered 1995-08-14","detail":"31 years old"},{"impact":8,"label":"420+ employees","detail":""},{"impact":5,"label":"Has LinkedIn company page","detail":""},{"impact":15,"label":"Manually verified by our team","detail":""},{"impact":6,"label":"Actively hiring: 4 jobs in last 90 days","detail":""},{"impact":5,"label":"4 past openings closed/filled","detail":""},{"impact":5,"label":"Apply link goes to jobs.lever.co","detail":"Known job board or the company's own site"}],"stats":{"posted30":2,"posted90":4,"posted365":7,"open":3,"closed":4,"avgDaysOpen":25,"staleOpen":0,"reposts":[],"reports":{},"monthly":[{"month":"2025-12","n":1},{"month":"2026-04","n":1},{"month":"2026-06","n":1},{"month":"2026-08","n":1},{"month":"2026-09","n":1},{"month":"2026-10","n":2}]}},"job":{"id":3,"company_id":1,"title":"UI/UX Designer","segment":"pro","category":"Design","description":"Design dashboards in Figma. Portfolio required.","salary_min":30000,"salary_max":50000,"salary_currency":"USD","location":"Worldwide","india_eligible":1,"source":"manual","external_id":null,"tags":"figma,ux","posted_at":"2026-09-17 05:51:12","status":"open","closed_at":null,"created_at":"2026-10-27 05:51:12","apply_host":"jobs.lever.co","match":null},"company":{"id":1,"name":"Northwind Cloud (sample)","website":"https://example.com","linkedin_url":"https://www.linkedin.com/company/example","founded_year":2012,"employee_count":420,"hq_country":"USA","description":"B2B cloud software company with a fully remote team across 30 countries.","domain_created":"1995-08-14","domain_checked_at":"2026-10-27 05:51:12","verified_by_admin":1,"created_at":"2026-10-27 05:51:12"},"segment":{"key":"pro","name":"Professional","usd":3,"rank":2,"covers":"Everything in Starter + software, design, marketing, sales, finance, QA, product roles"}},"4":{"locked":{"score":93,"level":"verified","locked":true,"signals":[{"impact":12,"label":"Founded 2017","detail":"9 years in business"},{"impact":12,"label":"Website domain registered 1995-08-31","detail":"31 years old"}],"hidden_signals":5,"stats":{"posted90":2}},"unlocked":{"score":93,"level":"verified","signals":[{"impact":12,"label":"Founded 2017","detail":"9 years in business"},{"impact":12,"label":"Website domain registered 1995-08-31","detail":"31 years old"},{"impact":8,"label":"85+ employees","detail":""},{"impact":5,"label":"Has LinkedIn company page","detail":""},{"impact":6,"label":"Actively hiring: 2 jobs in last 90 days","detail":""},{"impact":5,"label":"1 past openings closed/filled","detail":""},{"impact":5,"label":"Apply link goes to linkedin.com","detail":"Known job board or the company's own site"}],"stats":{"posted30":2,"posted90":2,"posted365":3,"open":2,"closed":1,"avgDaysOpen":18,"staleOpen":0,"reposts":[],"reports":{},"monthly":[{"month":"2026-05","n":1},{"month":"2026-10","n":2}]}},"job":{"id":4,"company_id":2,"title":"Online English Tutor (part-time)","segment":"basic","category":"Teaching","description":"Teach English to students online, 10–20 hrs/week, flexible hours. Paid hourly via Payoneer/Wise.","salary_min":6000,"salary_max":12000,"salary_currency":"USD","location":"Worldwide","india_eligible":1,"source":"manual","external_id":null,"tags":"teaching,english,part-time","posted_at":"2026-10-22 05:51:12","status":"open","closed_at":null,"created_at":"2026-10-27 05:51:12","apply_host":"www.linkedin.com","match":null},"company":{"id":2,"name":"Brightpath Learning (sample)","website":"https://example.org","linkedin_url":"https://www.linkedin.com/company/example-org","founded_year":2017,"employee_count":85,"hq_country":"UK","description":"Online tutoring marketplace hiring remote tutors and support staff worldwide.","domain_created":"1995-08-31","domain_checked_at":"2026-10-27 05:51:12","verified_by_admin":0,"created_at":"2026-10-27 05:51:12"},"segment":{"key":"basic","name":"Starter","usd":2,"rank":1,"covers":"Entry-level & non-tech: customer support, data entry, virtual assistant, content writing, tutoring"}},"5":{"locked":{"score":93,"level":"verified","locked":true,"signals":[{"impact":12,"label":"Founded 2017","detail":"9 years in business"},{"impact":12,"label":"Website domain registered 1995-08-31","detail":"31 years old"}],"hidden_signals":5,"stats":{"posted90":2}},"unlocked":{"score":93,"level":"verified","signals":[{"impact":12,"label":"Founded 2017","detail":"9 years in business"},{"impact":12,"label":"Website domain registered 1995-08-31","detail":"31 years old"},{"impact":8,"label":"85+ employees","detail":""},{"impact":5,"label":"Has LinkedIn company page","detail":""},{"impact":6,"label":"Actively hiring: 2 jobs in last 90 days","detail":""},{"impact":5,"label":"1 past openings closed/filled","detail":""},{"impact":5,"label":"Apply link goes to linkedin.com","detail":"Known job board or the company's own site"}],"stats":{"posted30":2,"posted90":2,"posted365":3,"open":2,"closed":1,"avgDaysOpen":18,"staleOpen":0,"reposts":[],"reports":{},"monthly":[{"month":"2026-05","n":1},{"month":"2026-10","n":2}]}},"job":{"id":5,"company_id":2,"title":"Content Writer","segment":"basic","category":"Writing","description":"Write educational blog posts. Part-time, paid per article.","salary_min":5000,"salary_max":10000,"salary_currency":"USD","location":"Anywhere","india_eligible":1,"source":"manual","external_id":null,"tags":"writing,seo","posted_at":"2026-10-07 05:51:12","status":"open","closed_at":null,"created_at":"2026-10-27 05:51:12","apply_host":"www.linkedin.com","match":null},"company":{"id":2,"name":"Brightpath Learning (sample)","website":"https://example.org","linkedin_url":"https://www.linkedin.com/company/example-org","founded_year":2017,"employee_count":85,"hq_country":"UK","description":"Online tutoring marketplace hiring remote tutors and support staff worldwide.","domain_created":"1995-08-31","domain_checked_at":"2026-10-27 05:51:12","verified_by_admin":0,"created_at":"2026-10-27 05:51:12"},"segment":{"key":"basic","name":"Starter","usd":2,"rank":1,"covers":"Entry-level & non-tech: customer support, data entry, virtual assistant, content writing, tutoring"}},"6":{"locked":{"score":0,"level":"risky","locked":true,"signals":[{"impact":-5,"label":"Very young company (founded 2025)","detail":"Not a red flag alone, but check carefully"},{"impact":-15,"label":"Website domain is less than 1 year old","detail":"Registered 2026-07-01"}],"hidden_signals":9,"stats":{"posted90":1}},"unlocked":{"score":0,"level":"risky","signals":[{"impact":-5,"label":"Very young company (founded 2025)","detail":"Not a red flag alone, but check carefully"},{"impact":-15,"label":"Website domain is less than 1 year old","detail":"Registered 2026-07-01"},{"impact":0,"label":"Small team (3)","detail":""},{"impact":-5,"label":"No LinkedIn company page","detail":""},{"impact":6,"label":"Actively hiring: 1 jobs in last 90 days","detail":""},{"impact":-25,"label":"Asks candidate to pay a fee","detail":"Genuine employers never ask for this"},{"impact":-25,"label":"Asks to continue on WhatsApp/Telegram","detail":"Genuine employers never ask for this"},{"impact":-25,"label":"Unrealistic pay with no interview/experience","detail":"Genuine employers never ask for this"},{"impact":-25,"label":"\"Earn X per day\" style promise","detail":"Genuine employers never ask for this"},{"impact":-10,"label":"Uses a free email (gmail/yahoo) for hiring","detail":""},{"impact":5,"label":"Apply link goes to quickearn-jobs.example","detail":"Known job board or the company's own site"}],"stats":{"posted30":1,"posted90":1,"posted365":1,"open":1,"closed":0,"avgDaysOpen":2,"staleOpen":0,"reposts":[],"reports":{},"monthly":[{"month":"2026-10","n":1}]}},"job":{"id":6,"company_id":3,"title":"Data Entry - Earn $300 per day","segment":"pro","category":"Data Entry","description":"No interview needed! Earn $300 per day. Pay a small refundable registration fee and contact us on WhatsApp. Email quickearn.hr@gmail.com","salary_min":100000,"salary_max":120000,"salary_currency":"USD","location":"Anywhere","india_eligible":1,"source":"manual","external_id":null,"tags":"data entry","posted_at":"2026-10-25 05:51:12","status":"open","closed_at":null,"created_at":"2026-10-27 05:51:12","apply_host":"quickearn-jobs.example","match":null},"company":{"id":3,"name":"QuickEarn Global (sample)","website":"https://quickearn-jobs.example","linkedin_url":null,"founded_year":2025,"employee_count":3,"hq_country":null,"description":"Work from home tasks, earn daily.","domain_created":"2026-07-01","domain_checked_at":"2026-10-27 05:51:12","verified_by_admin":0,"created_at":"2026-10-27 05:51:12"},"segment":{"key":"pro","name":"Professional","usd":3,"rank":2,"covers":"Everything in Starter + software, design, marketing, sales, finance, QA, product roles"}}},"company":{"1":{"locked":{"score":100,"level":"verified","locked":true,"signals":[{"impact":12,"label":"Founded 2012","detail":"14 years in business"},{"impact":12,"label":"Website domain registered 1995-08-14","detail":"31 years old"}],"stats":{}},"unlocked":{"score":100,"level":"verified","signals":[{"impact":12,"label":"Founded 2012","detail":"14 years in business"},{"impact":12,"label":"Website domain registered 1995-08-14","detail":"31 years old"},{"impact":8,"label":"420+ employees","detail":""},{"impact":5,"label":"Has LinkedIn company page","detail":""},{"impact":15,"label":"Manually verified by our team","detail":""},{"impact":6,"label":"Actively hiring: 4 jobs in last 90 days","detail":""},{"impact":5,"label":"4 past openings closed/filled","detail":""}],"stats":{"posted30":2,"posted90":4,"posted365":7,"open":3,"closed":4,"avgDaysOpen":25,"staleOpen":0,"reposts":[],"reports":{},"monthly":[{"month":"2025-12","n":1},{"month":"2026-04","n":1},{"month":"2026-06","n":1},{"month":"2026-08","n":1},{"month":"2026-09","n":1},{"month":"2026-10","n":2}]}},"company":{"id":1,"name":"Northwind Cloud (sample)","website":"https://example.com","linkedin_url":"https://www.linkedin.com/company/example","founded_year":2012,"employee_count":420,"hq_country":"USA","description":"B2B cloud software company with a fully remote team across 30 countries.","domain_created":"1995-08-14","domain_checked_at":"2026-10-27 05:51:12","verified_by_admin":1,"created_at":"2026-10-27 05:51:12"},"jobs":[{"id":1,"title":"Senior Backend Engineer (Node.js)","segment":"premium","status":"open","posted_at":"2026-10-24 05:51:12","closed_at":null},{"id":2,"title":"Customer Support Specialist","segment":"basic","status":"open","posted_at":"2026-10-17 05:51:12","closed_at":null},{"id":3,"title":"UI/UX Designer","segment":"pro","status":"open","posted_at":"2026-09-17 05:51:12","closed_at":null},{"id":10,"title":"QA Engineer","segment":"pro","status":"closed","posted_at":"2026-08-13 05:51:12","closed_at":"2026-09-07 05:51:12"},{"id":7,"title":"Frontend Engineer","segment":"pro","status":"closed","posted_at":"2026-06-29 05:51:12","closed_at":"2026-07-29 05:51:12"},{"id":8,"title":"DevOps Engineer","segment":"premium","status":"closed","posted_at":"2026-04-10 05:51:12","closed_at":"2026-05-20 05:51:12"},{"id":9,"title":"Support Lead","segment":"premium","status":"closed","posted_at":"2025-12-31 05:51:12","closed_at":"2026-01-30 05:51:12"}]},"2":{"locked":{"score":88,"level":"verified","locked":true,"signals":[{"impact":12,"label":"Founded 2017","detail":"9 years in business"},{"impact":12,"label":"Website domain registered 1995-08-31","detail":"31 years old"}],"stats":{}},"unlocked":{"score":88,"level":"verified","signals":[{"impact":12,"label":"Founded 2017","detail":"9 years in business"},{"impact":12,"label":"Website domain registered 1995-08-31","detail":"31 years old"},{"impact":8,"label":"85+ employees","detail":""},{"impact":5,"label":"Has LinkedIn company page","detail":""},{"impact":6,"label":"Actively hiring: 2 jobs in last 90 days","detail":""},{"impact":5,"label":"1 past openings closed/filled","detail":""}],"stats":{"posted30":2,"posted90":2,"posted365":3,"open":2,"closed":1,"avgDaysOpen":18,"staleOpen":0,"reposts":[],"reports":{},"monthly":[{"month":"2026-05","n":1},{"month":"2026-10","n":2}]}},"company":{"id":2,"name":"Brightpath Learning (sample)","website":"https://example.org","linkedin_url":"https://www.linkedin.com/company/example-org","founded_year":2017,"employee_count":85,"hq_country":"UK","description":"Online tutoring marketplace hiring remote tutors and support staff worldwide.","domain_created":"1995-08-31","domain_checked_at":"2026-10-27 05:51:12","verified_by_admin":0,"created_at":"2026-10-27 05:51:12"},"jobs":[{"id":4,"title":"Online English Tutor (part-time)","segment":"basic","status":"open","posted_at":"2026-10-22 05:51:12","closed_at":null},{"id":5,"title":"Content Writer","segment":"basic","status":"open","posted_at":"2026-10-07 05:51:12","closed_at":null},{"id":11,"title":"Math Tutor","segment":"basic","status":"closed","posted_at":"2026-05-30 05:51:12","closed_at":"2026-06-29 05:51:12"}]},"3":{"locked":{"score":21,"level":"risky","locked":true,"signals":[{"impact":-5,"label":"Very young company (founded 2025)","detail":"Not a red flag alone, but check carefully"},{"impact":-15,"label":"Website domain is less than 1 year old","detail":"Registered 2026-07-01"}],"stats":{}},"unlocked":{"score":21,"level":"risky","signals":[{"impact":-5,"label":"Very young company (founded 2025)","detail":"Not a red flag alone, but check carefully"},{"impact":-15,"label":"Website domain is less than 1 year old","detail":"Registered 2026-07-01"},{"impact":0,"label":"Small team (3)","detail":""},{"impact":-5,"label":"No LinkedIn company page","detail":""},{"impact":6,"label":"Actively hiring: 1 jobs in last 90 days","detail":""}],"stats":{"posted30":1,"posted90":1,"posted365":1,"open":1,"closed":0,"avgDaysOpen":2,"staleOpen":0,"reposts":[],"reports":{},"monthly":[{"month":"2026-10","n":1}]}},"company":{"id":3,"name":"QuickEarn Global (sample)","website":"https://quickearn-jobs.example","linkedin_url":null,"founded_year":2025,"employee_count":3,"hq_country":null,"description":"Work from home tasks, earn daily.","domain_created":"2026-07-01","domain_checked_at":"2026-10-27 05:51:12","verified_by_admin":0,"created_at":"2026-10-27 05:51:12"},"jobs":[{"id":6,"title":"Data Entry - Earn $300 per day","segment":"pro","status":"open","posted_at":"2026-10-25 05:51:12","closed_at":null}]}},"applyUrl":{"1":"https://boards.greenhouse.io/example/jobs/1","2":"https://jobs.lever.co/example/2","3":"https://jobs.lever.co/example/3","4":"https://www.linkedin.com/jobs/view/123","5":"https://www.linkedin.com/jobs/view/456","6":"https://quickearn-jobs.example/apply","7":"https://jobs.lever.co/example/x","8":"https://jobs.lever.co/example/x","9":"https://jobs.lever.co/example/x","10":"https://jobs.lever.co/example/x","11":"https://www.linkedin.com/jobs/view/789"}};</script>
+<script>// Preview-only: answers the site's API calls in the browser using captured sample data.
+const RANK = { basic: 1, pro: 2, premium: 3 };
+const mock = { user: null, plans: [], apps: [] };
+const reply = (status, body) => ({ ok: status < 400, status, json: async () => body });
+const err = (status, error, extra = {}) => reply(status, { error, ...extra });
+const today = (d = 0) => new Date(Date.now() + d * 864e5).toISOString().slice(0, 19).replace('T', ' ');
+const covers = seg => mock.plans.some(p => RANK[p.segment] >= RANK[seg]);
+function matchOf(job) {
+  const skills = (mock.user?.skills || '').toLowerCase().split(',').map(s => s.trim()).filter(Boolean);
+  if (!skills.length) return null;
+  const text = `${job.title} ${job.tags || ''} ${job.snippet || job.description || ''}`.toLowerCase();
+  return Math.round(100 * skills.filter(s => text.includes(s)).length / skills.length);
+}
+
+window.fetch = async (url, opts = {}) => {
+  const u = new URL(url, 'https://preview.local');
+  const p = u.pathname, m = (opts.method || 'GET').toUpperCase();
+  const body = typeof opts.body === 'string' ? JSON.parse(opts.body) : opts.body;
+  let x;
+  if (p === '/api/me') return reply(200, { user: mock.user, plans: mock.plans });
+  if (p === '/api/signup' || p === '/api/login') {
+    if (!body.email || !body.password || body.password.length < 8) return err(400, 'Enter an email and a password of at least 8 characters');
+    mock.user = { id: 1, email: body.email, name: body.name || body.email.split('@')[0], skills: '', headline: '', phone: '', experience_years: 0, resume_name: null, is_admin: 0 };
+    return reply(200, { user: mock.user });
+  }
+  if (p === '/api/logout') { mock.user = null; mock.plans = []; mock.apps = []; return reply(200, { ok: true }); }
+  if (p === '/api/profile' && m === 'PUT') { Object.assign(mock.user, body); return reply(200, { user: mock.user }); }
+  if (p === '/api/profile/resume') {
+    const f = body.get('resume');
+    if (!f?.name || !/\.(pdf|docx?)$/i.test(f.name)) return err(400, 'Upload a PDF/DOC/DOCX up to 5 MB');
+    mock.user.resume_name = f.name; return reply(200, { user: mock.user });
+  }
+  if (p === '/api/profile/applications') return reply(200, mock.apps);
+  if (p === '/api/pricing') return reply(200, { ...DATA.pricing, payments: 'demo' });
+  if (p === '/api/checkout') {
+    const s = DATA.pricing.segments.find(s => s.key === body.segment);
+    return reply(200, { mode: 'demo', subscription_id: s.key, amount_inr: s.inr });
+  }
+  if (p === '/api/checkout/verify') {
+    const s = DATA.pricing.segments.find(s => s.key === body.subscription_id);
+    mock.plans.push({ segment: s.key, amount_inr: s.inr, expires_at: today(DATA.pricing.days) });
+    return reply(200, { ok: true, plans: mock.plans });
+  }
+  if (p === '/api/jobs') {
+    const q = (u.searchParams.get('q') || '').toLowerCase(), seg = u.searchParams.get('segment'), cat = u.searchParams.get('category');
+    const all = DATA.jobs.filter(j => (!q || `${j.title} ${j.tags} ${j.company_name}`.toLowerCase().includes(q)) && (!seg || j.segment === seg) && (!cat || j.category === cat));
+    const jobs = all.filter(j => j.trust_level !== 'risky').map(j => ({ ...j, match: matchOf(j) }));
+    return reply(200, { jobs, categories: [...new Set(DATA.jobs.map(j => j.category))].sort(), hidden_risky: all.length - jobs.length });
+  }
+  if ((x = p.match(/^\/api\/jobs\/(\d+)\/apply$/))) {
+    const d = DATA.job[x[1]];
+    if (!mock.user) return err(401, 'Please log in first');
+    if (!mock.user.resume_name) return err(400, 'Upload your resume in your profile before applying', { code: 'NO_RESUME' });
+    if (!covers(d.job.segment)) return err(402, 'Plan needed', { code: 'NEED_PLAN', segment: d.job.segment });
+    if (d.unlocked.level === 'risky' && !body?.confirmRisky) return err(409, 'This job failed our background check. Are you sure?', { code: 'RISKY' });
+    if (!mock.apps.some(a => a.job_id == x[1])) mock.apps.unshift({ job_id: d.job.id, title: d.job.title, company: d.company.name, applied_at: today() });
+    return reply(200, { apply_url: DATA.applyUrl[x[1]] });
+  }
+  if ((x = p.match(/^\/api\/jobs\/(\d+)$/))) {
+    const d = DATA.job[x[1]]; if (!d) return err(404, 'Job not found');
+    const unlocked = Boolean(mock.user && covers(d.job.segment));
+    return reply(200, { job: { ...d.job, match: matchOf(d.job) }, company: d.company, segment: d.segment, unlocked,
+      report: unlocked ? d.unlocked : d.locked, applied: mock.apps.some(a => a.job_id == x[1]) });
+  }
+  if ((x = p.match(/^\/api\/companies\/(\d+)\/report$/))) return reply(200, { ok: true });
+  if ((x = p.match(/^\/api\/companies\/(\d+)$/))) {
+    const d = DATA.company[x[1]]; if (!d) return err(404, 'Company not found');
+    const unlocked = Boolean(mock.user && mock.plans.length);
+    return reply(200, { company: d.company, jobs: d.jobs, unlocked, report: unlocked ? d.unlocked : d.locked });
+  }
+  return err(404, 'Not available in the preview');
+};
+
+// Navigation inside the preview: keep the route in memory (artifact links only carry a plain #name).
+const loc = { _h: '#/', get hash() { return this._h; }, set hash(v) { this._h = v; scrollTo(0, 0); route(); } };
+document.addEventListener('click', e => {
+  const a = e.target.closest('a[href^="#"]');
+  if (a && a.id !== 'logout') { e.preventDefault(); loc.hash = a.getAttribute('href'); }
+});
+
+// In-page dialogs (the viewer has no confirm()/prompt()).
+function uiDialog(message, withInput) {
+  return new Promise(resolve => {
+    const d = document.createElement('div');
+    d.className = 'modal';
+    d.innerHTML = `<div class="card"><p></p>${withInput ? '<textarea id="dlg-input" rows="3"></textarea>' : ''}
+      <div class="row" style="justify-content:flex-end;margin-top:12px"><button class="ghost" data-v="0">Cancel</button><button data-v="1">OK</button></div></div>`;
+    d.querySelector('p').textContent = message;
+    d.addEventListener('click', e => {
+      const v = e.target.dataset?.v; if (v === undefined) return;
+      const val = withInput ? d.querySelector('textarea').value : true;
+      d.remove(); resolve(v === '1' ? val : (withInput ? null : false));
+    });
+    document.body.append(d); d.querySelector(withInput ? 'textarea' : 'button[data-v="1"]').focus();
+  });
+}
+const uiConfirm = m => uiDialog(m, false);
+const uiPrompt = m => uiDialog(m, true);
+</script>
+<script>// Tiny single-page app: hash routes -> render functions. No framework needed.
+const $app = document.getElementById('app');
+const state = { user: null, plans: [] };
+
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const inr = n => '₹' + Number(n).toLocaleString('en-IN');
+const ago = d => { const days = Math.floor((Date.now() - Date.parse(d.replace(' ', 'T') + 'Z')) / 864e5); return days <= 0 ? 'today' : days === 1 ? '1 day ago' : `${days} days ago`; };
+const LEVEL = { verified: '✔ Verified', caution: '⚠ Check carefully', risky: '✖ Risky' };
+const badge = (level, score) => `<span class="badge ${level}">${LEVEL[level]}${score != null ? ` · ${score}` : ''}</span>`;
+const salary = j => j.salary_min ? `$${(j.salary_min / 1000).toFixed(0)}k–$${(j.salary_max / 1000).toFixed(0)}k / yr` : '';
+
+async function api(path, opts = {}) {
+  const res = await fetch(path, { headers: opts.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }, ...opts,
+    body: opts.body && !(opts.body instanceof FormData) ? JSON.stringify(opts.body) : opts.body });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw Object.assign(new Error(data.error || 'Request failed'), { status: res.status, data });
+  return data;
+}
+
+async function loadMe() { Object.assign(state, await api('/api/me')); renderNav(); }
+
+function renderNav() {
+  const u = state.user;
+  document.getElementById('nav').innerHTML = `<a href="#/">Jobs</a><a href="#/pricing">Pricing</a>` +
+    (u ? `${u.is_admin ? '<a href="#/admin">Admin</a>' : ''}<a href="#/profile">My profile</a><a href="#" id="logout">Logout</a>`
+       : `<a href="#/login">Login</a><a href="#/signup" class="btn">Sign up</a>`);
+  document.getElementById('logout')?.addEventListener('click', async e => { e.preventDefault(); await api('/api/logout', { method: 'POST' }); await loadMe(); loc.hash = '#/'; });
+}
+
+// ---------- pages ----------
+async function homePage() {
+  const params = new URLSearchParams(loc.hash.split('?')[1] || '');
+  $app.innerHTML = `
+    <section class="hero">
+      <h1>Genuine international remote jobs, open to India</h1>
+      <p class="muted">Every company is background-checked: founding year, website age, hiring history, repost patterns and scam signals.</p>
+    </section>
+    <form class="card row filters" id="f">
+      <input name="q" placeholder="Search title, skill or company" value="${esc(params.get('q'))}">
+      <select name="segment"><option value="">All levels</option><option value="basic">Starter (entry / non-tech)</option><option value="pro">Professional</option><option value="premium">Senior / specialist</option></select>
+      <select name="category"><option value="">All categories</option></select>
+      <button>Search</button>
+    </form>
+    <div id="list"><p class="muted">Loading jobs…</p></div>`;
+  const f = document.getElementById('f');
+  f.segment.value = params.get('segment') || '';
+  f.onsubmit = e => { e.preventDefault(); loc.hash = '#/?' + new URLSearchParams(new FormData(f)).toString(); };
+
+  const data = await api('/api/jobs?' + params.toString());
+  f.category.innerHTML += data.categories.map(c => `<option>${esc(c)}</option>`).join('');
+  f.category.value = params.get('category') || '';
+  document.getElementById('list').innerHTML = (data.jobs.length ? data.jobs.map(j => `
+    <article class="card job">
+      <div class="row between">
+        <div>
+          <h3><a href="#/job/${j.id}">${esc(j.title)}</a></h3>
+          <a class="muted" href="#/company/${j.company_id}">${esc(j.company_name)}</a>
+        </div>
+        ${badge(j.trust_level, j.trust_score)}
+      </div>
+      <p class="muted small">${esc(j.snippet)}…</p>
+      <div class="row small">
+        <span class="pill">${esc(j.location || 'Remote')}</span>
+        ${j.category ? `<span class="pill">${esc(j.category)}</span>` : ''}
+        ${salary(j) ? `<span class="pill">${salary(j)}</span>` : ''}
+        ${j.match != null ? `<span class="pill">Skill match ${j.match}%</span>` : ''}
+        <span class="muted">Posted ${ago(j.posted_at)}</span>
+      </div>
+    </article>`).join('') : '<div class="card muted">No jobs found.</div>') +
+    (data.hidden_risky ? `<p class="muted small">🛡 ${data.hidden_risky} job(s) hidden because they failed our background check.</p>` : '');
+}
+
+function reportCard(report, company) {
+  const s = report.stats || {};
+  const max = Math.max(1, ...(s.monthly || []).map(m => m.n));
+  return `
+    <div class="card ${report.locked ? 'locked' : ''}">
+      <div class="row between">
+        <div><h2 style="margin:0">Company background check</h2><span class="muted small">${esc(company.name)}</span></div>
+        <div style="text-align:right"><div class="score">${report.score}<span class="muted small">/100</span></div>${badge(report.level)}</div>
+      </div>
+      ${report.locked ? '' : `
+      <div class="stats">
+        <div class="stat"><b>${company.founded_year || '—'}</b><span class="muted small">Founded</span></div>
+        <div class="stat"><b>${company.employee_count ?? '—'}</b><span class="muted small">Employees</span></div>
+        <div class="stat"><b>${company.domain_created ? company.domain_created.slice(0, 4) : '—'}</b><span class="muted small">Website since</span></div>
+        <div class="stat"><b>${s.posted30}</b><span class="muted small">Jobs posted (30 days)</span></div>
+        <div class="stat"><b>${s.posted90}</b><span class="muted small">Jobs posted (90 days)</span></div>
+        <div class="stat"><b>${s.closed}</b><span class="muted small">Openings filled/closed</span></div>
+        <div class="stat"><b>${s.avgDaysOpen ?? '—'}</b><span class="muted small">Avg days a job stays open</span></div>
+        <div class="stat"><b>${(s.reports?.hired || 0)}</b><span class="muted small">Members hired</span></div>
+      </div>
+      ${s.monthly?.length ? `<p class="small muted" style="margin:16px 0 0">Jobs posted per month (last 12 months)</p>
+        <div class="bars">${s.monthly.map(m => `<div style="height:${(m.n / max) * 100}%" title="${m.month}: ${m.n}"><span>${m.month.slice(5)}</span></div>`).join('')}</div><br>` : ''}`}
+      <ul class="signals">${report.signals.map(x => `
+        <li><span class="imp ${x.impact > 0 ? 'plus' : x.impact < 0 ? 'minus' : 'zero'}">${x.impact > 0 ? '+' : ''}${x.impact}</span>
+        <div>${esc(x.label)}${x.detail ? `<div class="muted small">${esc(x.detail)}</div>` : ''}</div></li>`).join('')}</ul>
+      ${report.locked ? `<p><b>🔒 ${report.hidden_signals ?? 'More'} more checks, hiring history and the apply link are locked.</b><br>
+        <a class="btn" href="#/pricing">Unlock from ${'$'}2/month</a></p>` : ''}
+    </div>`;
+}
+
+async function jobPage(id) {
+  const d = await api('/api/jobs/' + id);
+  const j = d.job;
+  $app.innerHTML = `
+    <div id="msg"></div>
+    <div class="card">
+      <div class="row between">
+        <div><h1 style="margin:0">${esc(j.title)}</h1><a href="#/company/${d.company.id}">${esc(d.company.name)}</a></div>
+        ${badge(d.report.level, d.report.score)}
+      </div>
+      <div class="row small" style="margin:10px 0">
+        <span class="pill">${esc(j.location)}</span>${j.category ? `<span class="pill">${esc(j.category)}</span>` : ''}
+        ${salary(j) ? `<span class="pill">${salary(j)}</span>` : ''}<span class="pill">Plan: ${esc(d.segment.name)}</span>
+        ${j.match != null ? `<span class="pill">Skill match ${j.match}%</span>` : ''}<span class="muted">Posted ${ago(j.posted_at)} · via ${esc(j.source)}</span>
+      </div>
+      <div class="row">
+        <button id="apply" ${d.applied ? 'class="ghost"' : ''}>${d.applied ? 'Applied ✓ – open again' : d.unlocked ? `Apply on ${esc(j.apply_host)}` : '🔒 Apply'}</button>
+        <span class="muted small">You'll apply on the employer's original page (${esc(j.apply_host)}).</span>
+      </div>
+    </div>
+    ${reportCard(d.report, d.company)}
+    <div class="card"><h3>Job description</h3><div class="desc">${esc(j.description || 'See original posting.')}</div></div>
+    ${state.user ? `<div class="card"><h3>Applied here before? Help others</h3><div class="row">
+      ${[['hired', '🎉 I got hired'], ['interview', '💬 Got an interview'], ['no_response', '🕳 No response'], ['scam', '🚩 Report scam']]
+        .map(([k, t]) => `<button class="ghost" data-report="${k}">${t}</button>`).join('')}</div></div>` : ''}`;
+
+  const msg = (t, ok) => { document.getElementById('msg').innerHTML = `<div class="alert ${ok ? 'ok' : 'err'}">${t}</div>`; scrollTo(0, 0); };
+  document.getElementById('apply').onclick = async () => {
+    if (!state.user) return (loc.hash = '#/login?next=' + encodeURIComponent(loc.hash));
+    try {
+      let r;
+      try { r = await api(`/api/jobs/${id}/apply`, { method: 'POST', body: {} }); }
+      catch (e) {
+        if (e.data?.code !== 'RISKY' || !await uiConfirm(e.message)) throw e;
+        r = await api(`/api/jobs/${id}/apply`, { method: 'POST', body: { confirmRisky: true } });
+      }
+      msg(`Saved in "My applications". On the live site this opens the employer's page: <b>${esc(r.apply_url)}</b>`, true);
+    } catch (e) {
+      if (e.data?.code === 'NEED_PLAN') return (loc.hash = '#/pricing?need=' + e.data.segment);
+      if (e.data?.code === 'NO_RESUME') { msg(esc(e.message) + ' → <a href="#/profile">Go to profile</a>'); return; }
+      msg(esc(e.message));
+    }
+  };
+  document.querySelectorAll('[data-report]').forEach(b => b.onclick = async () => {
+    const note = b.dataset.report === 'scam' ? await uiPrompt('What happened? (e.g. asked for a fee)') : '';
+    if (note === null) return;
+    try { await api(`/api/companies/${d.company.id}/report`, { method: 'POST', body: { kind: b.dataset.report, note, job_id: j.id } }); msg('Thanks! Your report updates this company\'s score.', true); }
+    catch (e) { msg(esc(e.message)); }
+  });
+}
+
+async function companyPage(id) {
+  const d = await api('/api/companies/' + id);
+  const c = d.company;
+  $app.innerHTML = `
+    <div class="card">
+      <h1 style="margin:0">${esc(c.name)}</h1>
+      <p class="muted">${esc(c.description || '')}</p>
+      <div class="row small">
+        ${c.website ? `<a href="${esc(c.website)}" target="_blank" rel="noopener">Website ↗</a>` : ''}
+        ${c.linkedin_url ? `<a href="${esc(c.linkedin_url)}" target="_blank" rel="noopener">LinkedIn ↗</a>` : ''}
+        ${c.hq_country ? `<span class="pill">HQ: ${esc(c.hq_country)}</span>` : ''}
+      </div>
+    </div>
+    ${reportCard(d.report, c)}
+    <div class="card"><h3>Job history</h3><table><tr><th>Role</th><th>Posted</th><th>Status</th></tr>
+      ${d.jobs.map(j => `<tr><td>${j.status === 'open' ? `<a href="#/job/${j.id}">${esc(j.title)}</a>` : esc(j.title)}</td><td>${j.posted_at.slice(0, 10)}</td><td>${j.status}</td></tr>`).join('')}
+    </table></div>`;
+}
+
+function authPage(mode) {
+  const next = new URLSearchParams(loc.hash.split('?')[1] || '').get('next') || '#/profile';
+  $app.innerHTML = `
+    <form class="card" id="f" style="max-width:420px;margin:30px auto">
+      <h2>${mode === 'login' ? 'Log in' : 'Create your free profile'}</h2>
+      <div id="msg"></div>
+      ${mode === 'signup' ? '<label>Full name</label><input name="name" required>' : ''}
+      <label>Email</label><input name="email" type="email" required>
+      <label>Password</label><input name="password" type="password" minlength="8" required>
+      <br><br><button style="width:100%">${mode === 'login' ? 'Log in' : 'Sign up'}</button>
+      <p class="small muted">${mode === 'login' ? 'New here? <a href="#/signup">Create an account</a>' : 'Already registered? <a href="#/login">Log in</a>'}</p>
+    </form>`;
+  const f = document.getElementById('f');
+  f.onsubmit = async e => {
+    e.preventDefault();
+    try { await api('/api/' + mode, { method: 'POST', body: Object.fromEntries(new FormData(f)) }); await loadMe(); loc.hash = next; }
+    catch (err) { document.getElementById('msg').innerHTML = `<div class="alert err">${esc(err.message)}</div>`; }
+  };
+}
+
+async function profilePage() {
+  if (!state.user) return (loc.hash = '#/login');
+  const u = state.user;
+  const apps = await api('/api/profile/applications');
+  $app.innerHTML = `
+    <div id="msg"></div>
+    <div class="grid">
+      <form class="card" id="pf">
+        <h2 style="margin-top:0">My profile</h2>
+        <label>Name</label><input name="name" value="${esc(u.name)}">
+        <label>Phone</label><input name="phone" value="${esc(u.phone)}">
+        <label>Headline</label><input name="headline" placeholder="e.g. React developer, 3 yrs" value="${esc(u.headline)}">
+        <label>Skills (comma separated – used to match jobs)</label><input name="skills" placeholder="react, node, english, customer support" value="${esc(u.skills)}">
+        <label>Years of experience</label><input name="experience_years" type="number" min="0" value="${u.experience_years || 0}">
+        <br><br><button>Save profile</button>
+      </form>
+      <div>
+        <form class="card" id="rf">
+          <h3 style="margin-top:0">Resume</h3>
+          ${u.resume_name ? `<p>Current: <b>${esc(u.resume_name)}</b></p>` : '<p class="muted">No resume yet. You need one before applying.</p>'}
+          <input type="file" name="resume" accept=".pdf,.doc,.docx" required>
+          <br><br><button>Upload resume</button>
+        </form>
+        <div class="card">
+          <h3 style="margin-top:0">My plans</h3>
+          ${state.plans.length ? state.plans.map(p => `<p><b>${p.segment.toUpperCase()}</b> – active until ${p.expires_at.slice(0, 10)}</p>`).join('') : '<p class="muted">No active plan.</p>'}
+          <a class="btn ghost" href="#/pricing">See plans</a>
+        </div>
+      </div>
+    </div>
+    <div class="card"><h3 style="margin-top:0">My applications</h3>
+      ${apps.length ? `<table><tr><th>Job</th><th>Company</th><th>Date</th></tr>${apps.map(a => `<tr><td><a href="#/job/${a.job_id}">${esc(a.title)}</a></td><td>${esc(a.company)}</td><td>${a.applied_at.slice(0, 10)}</td></tr>`).join('')}</table>` : '<p class="muted">You haven\'t applied anywhere yet.</p>'}
+    </div>`;
+  const msg = (t, ok) => document.getElementById('msg').innerHTML = `<div class="alert ${ok ? 'ok' : 'err'}">${esc(t)}</div>`;
+  const pf = document.getElementById('pf');
+  pf.onsubmit = async e => { e.preventDefault(); try { state.user = (await api('/api/profile', { method: 'PUT', body: Object.fromEntries(new FormData(pf)) })).user; msg('Profile saved', true); } catch (err) { msg(err.message); } };
+  const rf = document.getElementById('rf');
+  rf.onsubmit = async e => { e.preventDefault(); try { await api('/api/profile/resume', { method: 'POST', body: new FormData(rf) }); await loadMe(); profilePage(); } catch (err) { msg(err.message); } };
+}
+
+async function pricingPage() {
+  const need = new URLSearchParams(loc.hash.split('?')[1] || '').get('need');
+  const p = await api('/api/pricing');
+  $app.innerHTML = `
+    <section class="hero"><h1>Simple monthly plans</h1>
+      <p class="muted">Pay once for ${p.days} days. Prices in USD converted to INR at today's rate (1 USD = ₹${p.fx_rate.toFixed(2)}).</p>
+      ${need ? `<div class="alert err">This job needs the <b>${esc(p.segments.find(s => s.key === need)?.name)}</b> plan or higher.</div>` : ''}
+      ${p.payments === 'demo' ? '<div class="alert err small">DEMO MODE: no real payment is taken. Add Razorpay keys in .env to go live.</div>' : ''}
+    </section>
+    <div id="msg"></div>
+    <div class="grid">${p.segments.map(s => `
+      <div class="card plan ${s.key === (need || 'pro') ? 'best' : ''}">
+        <h3 style="margin:0">${esc(s.name)}</h3>
+        <div class="price">${inr(s.inr)}</div><div class="muted small">≈ $${s.usd} · ${p.days} days</div>
+        <p>${esc(s.covers)}</p>
+        <ul class="small"><li>Full company background reports</li><li>Hiring history & scam signals</li><li>Apply links to original job pages</li><li>Application tracking</li></ul>
+        <button data-buy="${s.key}" style="width:100%">Get ${esc(s.name)}</button>
+      </div>`).join('')}</div>`;
+  document.querySelectorAll('[data-buy]').forEach(b => b.onclick = () => buy(b.dataset.buy));
+}
+
+async function buy(segment) {
+  if (!state.user) return (loc.hash = '#/login?next=' + encodeURIComponent('#/pricing'));
+  const msg = (t, ok) => document.getElementById('msg').innerHTML = `<div class="alert ${ok ? 'ok' : 'err'}">${esc(t)}</div>`;
+  try {
+    const o = await api('/api/checkout', { method: 'POST', body: { segment } });
+    const done = async payload => { await api('/api/checkout/verify', { method: 'POST', body: { subscription_id: o.subscription_id, ...payload } }); await loadMe(); msg('Payment successful! Your plan is active.', true); };
+    if (o.mode === 'demo') {
+      if (await uiConfirm(`DEMO payment of ${inr(o.amount_inr)}. Activate plan?`)) await done({});
+      return;
+    }
+    await loadScript('https://checkout.razorpay.com/v1/checkout.js');
+    new Razorpay({
+      key: o.key_id, order_id: o.order_id, amount: o.amount, currency: 'INR', name: 'RemoteCheck', description: o.description,
+      prefill: { name: o.name, email: o.email }, theme: { color: '#4f46e5' },
+      handler: r => done(r).catch(e => msg(e.message)),
+    }).open();
+  } catch (e) { msg(e.message); }
+}
+const loadScript = src => new Promise((ok, fail) => { if (document.querySelector(`script[src="${src}"]`)) return ok(); const s = Object.assign(document.createElement('script'), { src, onload: ok, onerror: fail }); document.head.append(s); });
+
+async function adminPage() {
+  if (!state.user?.is_admin) return ($app.innerHTML = '<div class="card">Admins only. Set ADMIN_EMAIL in .env and sign up with that email.</div>');
+  const [stats, companies] = await Promise.all([api('/api/admin/stats'), api('/api/admin/companies')]);
+  $app.innerHTML = `
+    <h1>Admin</h1><div id="msg"></div>
+    <div class="stats card">${Object.entries(stats).map(([k, v]) => `<div class="stat"><b>${v}</b><span class="muted small">${k.replace(/_/g, ' ')}</span></div>`).join('')}</div>
+    <div class="card row between"><div><b>Import real remote jobs</b><div class="muted small">From Remotive + Himalayas, only roles open to India/worldwide.</div></div><button id="imp">Run import</button></div>
+    <div class="grid">
+      <form class="card" id="cf"><h3 style="margin-top:0">Add / update company</h3>
+        <label>Name</label><input name="name" required><label>Website</label><input name="website" placeholder="https://…">
+        <label>LinkedIn page</label><input name="linkedin_url"><label>Founded year</label><input name="founded_year" type="number">
+        <label>Employees</label><input name="employee_count" type="number"><label>HQ country</label><input name="hq_country">
+        <label>About</label><textarea name="description" rows="3"></textarea>
+        <label><input type="checkbox" name="verified_by_admin" style="width:auto"> I verified this company manually</label>
+        <br><button>Save company</button></form>
+      <form class="card" id="jf"><h3 style="margin-top:0">Add job</h3>
+        <label>Company</label><select name="company_id">${companies.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select>
+        <label>Title</label><input name="title" required><label>Category</label><input name="category">
+        <label>Plan segment</label><select name="segment"><option value="">Auto-detect</option><option value="basic">Starter $2</option><option value="pro">Professional $3</option><option value="premium">Senior $4</option></select>
+        <label>Apply URL (LinkedIn / careers page)</label><input name="apply_url" required placeholder="https://www.linkedin.com/jobs/view/…">
+        <label>Location eligibility</label><input name="location" value="Worldwide">
+        <label>Salary min / max (USD/yr)</label><div class="row"><input name="salary_min" type="number" style="flex:1"><input name="salary_max" type="number" style="flex:1"></div>
+        <label>Tags</label><input name="tags" placeholder="react, node"><label>Description</label><textarea name="description" rows="4"></textarea>
+        <br><button>Add job</button></form>
+    </div>`;
+  const msg = (t, ok) => { document.getElementById('msg').innerHTML = `<div class="alert ${ok ? 'ok' : 'err'}">${esc(t)}</div>`; scrollTo(0, 0); };
+  document.getElementById('imp').onclick = async e => { e.target.disabled = true; e.target.textContent = 'Importing…'; try { msg('Import result: ' + JSON.stringify(await api('/api/admin/import', { method: 'POST' })), true); } catch (err) { msg(err.message); } e.target.disabled = false; e.target.textContent = 'Run import'; };
+  for (const [id, url] of [['cf', '/api/admin/companies'], ['jf', '/api/admin/jobs']]) {
+    const f = document.getElementById(id);
+    f.onsubmit = async e => {
+      e.preventDefault();
+      const body = Object.fromEntries(new FormData(f)); if (id === 'cf') body.verified_by_admin = f.verified_by_admin.checked;
+      try { await api(url, { method: 'POST', body }); msg('Saved', true); f.reset(); if (id === 'cf') adminPage(); } catch (err) { msg(err.message); }
+    };
+  }
+}
+
+// ---------- router ----------
+async function route() {
+  const [path] = loc.hash.slice(1).split('?');
+  const parts = (path || '/').split('/').filter(Boolean);
+  try {
+    if (!parts.length) await homePage();
+    else if (parts[0] === 'job') await jobPage(parts[1]);
+    else if (parts[0] === 'company') await companyPage(parts[1]);
+    else if (parts[0] === 'login' || parts[0] === 'signup') authPage(parts[0]);
+    else if (parts[0] === 'profile') await profilePage();
+    else if (parts[0] === 'pricing') await pricingPage();
+    else if (parts[0] === 'admin') await adminPage();
+    else $app.innerHTML = '<div class="card">Page not found</div>';
+  } catch (e) { $app.innerHTML = `<div class="alert err">${esc(e.message)}</div>`; }
+}
+
+loadMe().then(route);
+</script>
+</body>
+</html>
