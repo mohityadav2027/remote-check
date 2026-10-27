@@ -57,15 +57,28 @@ function matchScore(user, job) {
 }
 
 // ---------- auth ----------
-app.post('/api/signup', ah(async (req, res) => {
+// Resumes: PDF or Word, up to 5 MB, stored privately under data/resumes with a random file name
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: db.RESUME_DIR,
+    filename: (req, file, cb) => cb(null, `${crypto.randomBytes(12).toString('hex')}${path.extname(file.originalname).toLowerCase()}`),
+  }),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => cb(null, ['.pdf', '.doc', '.docx'].includes(path.extname(file.originalname).toLowerCase())),
+});
+
+// Sign-up takes the resume too, so applying never stops to ask for one.
+app.post('/api/signup', upload.single('resume'), ah(async (req, res) => {
+  const fail = (status, error) => { if (req.file) fs.rm(req.file.path, () => {}); return res.status(status).json({ error }); };
   const { email, password, name } = req.body || {};
-  if (!email || !/^\S+@\S+\.\S+$/.test(email)) return res.status(400).json({ error: 'Valid email required' });
-  if (!password || password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
-  if (!name) return res.status(400).json({ error: 'Name required' });
-  if (db.prepare('SELECT 1 FROM users WHERE email = ?').get(email.toLowerCase())) return res.status(409).json({ error: 'Email already registered' });
+  if (!email || !/^\S+@\S+\.\S+$/.test(email)) return fail(400, 'Valid email required');
+  if (!password || password.length < 8) return fail(400, 'Password must be at least 8 characters');
+  if (!name) return fail(400, 'Name required');
+  if (db.prepare('SELECT 1 FROM users WHERE email = ?').get(email.toLowerCase())) return fail(409, 'Email already registered');
   const isAdmin = process.env.ADMIN_EMAIL && email.toLowerCase() === process.env.ADMIN_EMAIL.toLowerCase() ? 1 : 0;
-  const r = db.prepare('INSERT INTO users (email, password_hash, name, is_admin) VALUES (?,?,?,?)')
-    .run(email.toLowerCase(), await bcrypt.hash(password, 10), name.trim(), isAdmin);
+  if (!req.file && !isAdmin) return fail(400, 'Upload your resume (PDF or Word, up to 5 MB) to create your account');
+  const r = db.prepare('INSERT INTO users (email, password_hash, name, is_admin, resume_path, resume_name) VALUES (?,?,?,?,?,?)')
+    .run(email.toLowerCase(), await bcrypt.hash(password, 10), name.trim(), isAdmin, req.file?.path ?? null, req.file?.originalname ?? null);
   req.session.userId = Number(r.lastInsertRowid);
   res.json({ user: publicUser(currentUser(req)) });
 }));
@@ -93,15 +106,6 @@ app.put('/api/profile', auth, (req, res) => {
     .run(clip(name, 80), clip(phone, 30), clip(headline, 120), clip(skills, 400), Number(experience_years) || 0,
       clip(target_role, 80), clip(hours, 60), clip(linkedin_url, 160), req.user.id);
   res.json({ user: publicUser(currentUser(req)) });
-});
-
-const upload = multer({
-  storage: multer.diskStorage({
-    destination: db.RESUME_DIR,
-    filename: (req, file, cb) => cb(null, `${req.user.id}-${Date.now()}${path.extname(file.originalname).toLowerCase()}`),
-  }),
-  limits: { fileSize: 5 * 1024 * 1024 },
-  fileFilter: (req, file, cb) => cb(null, ['.pdf', '.doc', '.docx'].includes(path.extname(file.originalname).toLowerCase())),
 });
 
 app.post('/api/profile/resume', auth, upload.single('resume'), (req, res) => {
@@ -187,21 +191,40 @@ app.get('/api/jobs/:id', ah(async (req, res) => {
 }));
 
 // Applying happens on the ORIGINAL site (LinkedIn, Greenhouse, company careers…). We check, track and redirect.
-app.post('/api/jobs/:id/apply', auth, (req, res) => {
-  const job = db.prepare('SELECT * FROM jobs WHERE id=?').get(req.params.id);
-  if (!job) return res.status(404).json({ error: 'Job not found' });
-  if (!req.user.resume_path) return res.status(400).json({ error: 'Upload your resume in your profile before applying', code: 'NO_RESUME' });
-  const paid = req.user.is_admin || hasAccess(req.user.id, job.segment);
-  const again = hasApplied(req.user.id, job.id);   // opening a job you already applied to never costs anything
-  if (!paid && !again && trialInfo(req.user.id).left === 0)
-    return res.status(402).json({ error: `You've used your ${FREE_APPLIES} free applications. This job needs the ${SEGMENTS[job.segment].name} pass.`,
-      code: 'NEED_PLAN', segment: job.segment });
+// Returns { ok, job, free } or { status, code, error, segment }.
+function tryApply(user, jobId, confirmRisky) {
+  const job = db.prepare('SELECT * FROM jobs WHERE id=?').get(jobId);
+  if (!job) return { status: 404, error: 'Job not found' };
+  if (!user.resume_path && !user.is_admin) return { status: 400, code: 'NO_RESUME', error: 'Upload your resume in your profile before applying' };
+  const paid = user.is_admin || hasAccess(user.id, job.segment);
+  const again = hasApplied(user.id, job.id);   // opening a job you already applied to never costs anything
+  if (!paid && !again && trialInfo(user.id).left === 0)
+    return { status: 402, code: 'NEED_PLAN', segment: job.segment,
+      error: `You've used your ${FREE_APPLIES} free applications. This job needs the ${SEGMENTS[job.segment].name} pass.` };
   const company = db.prepare('SELECT * FROM companies WHERE id=?').get(job.company_id);
-  const { level } = scoreCompany(company, job);
-  if (level === 'risky' && !req.body?.confirmRisky)
-    return res.status(409).json({ error: 'This job failed our background check. Are you sure?', code: 'RISKY' });
-  db.prepare('INSERT OR IGNORE INTO applications (user_id, job_id) VALUES (?,?)').run(req.user.id, job.id);
-  res.json({ apply_url: job.apply_url, free: !paid && !again, trial: trialInfo(req.user.id) });
+  if (scoreCompany(company, job).level === 'risky' && !confirmRisky)
+    return { status: 409, code: 'RISKY', error: 'This job failed our background check. Are you sure?' };
+  db.prepare('INSERT OR IGNORE INTO applications (user_id, job_id) VALUES (?,?)').run(user.id, job.id);
+  return { ok: true, job, free: !paid && !again };
+}
+
+app.post('/api/jobs/:id/apply', auth, (req, res) => {
+  const r = tryApply(req.user, req.params.id, req.body?.confirmRisky);
+  if (!r.ok) return res.status(r.status).json({ error: r.error, code: r.code, segment: r.segment });
+  res.json({ apply_url: r.job.apply_url, free: r.free, trial: trialInfo(req.user.id) });
+});
+
+// The Apply button is a plain link to /go/<job id>, opened in a new tab. Because it's a real link
+// (not a script opening a window), browsers never block it: the employer's page opens straight away.
+app.get('/go/:id', (req, res) => {
+  const user = currentUser(req);
+  const back = `/#/job/${encodeURIComponent(req.params.id)}`;
+  if (!user) return res.redirect('/#/signup?next=' + encodeURIComponent(back.slice(1)));
+  const r = tryApply(user, req.params.id, req.query.confirm === '1');
+  if (r.ok) return res.redirect(r.job.apply_url);
+  if (r.code === 'NEED_PLAN') return res.redirect(`/#/pricing?need=${r.segment}`);
+  if (r.code === 'NO_RESUME') return res.redirect('/#/profile');
+  res.redirect(r.status === 404 ? '/#/' : back);
 });
 
 // ---------- companies ----------

@@ -26,6 +26,10 @@ Sign up with the `ADMIN_EMAIL` address to get the **Admin** page. There you can 
 
 The score runs from 0 to 100: **Verified** is 70 or more, **Check carefully** is 45–69, **Risky** is below 45. Risky jobs are hidden from the job list.
 
+## Sign-up and applying
+- **Sign-up asks for a resume** (PDF or Word, up to 5 MB), so applying never stops to ask for one. The admin account (`ADMIN_EMAIL`) can sign up without one.
+- **Apply opens the employer's page straight away.** The Apply button is a normal link to `/go/<job id>`, opened in a new tab. The server checks the free trial or pass, records the application, and redirects to the employer's job page (LinkedIn, Greenhouse, Lever, company careers page). Because it's a real link, browsers don't block it the way they block pop-up windows.
+
 ## Free trial
 Every new user's **first 2 applications are free**, on any job and any plan level, with the full background check on those jobs. After that, applying needs a pass. Opening a job you already applied to never counts again. Change the number with `FREE_APPLIES` (for example `FREE_APPLIES=3`, or `0` for no trial).
 

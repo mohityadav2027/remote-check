@@ -203,6 +203,19 @@ async function companyPage(id) {
 }
 
 // ---------- job page ----------
+// Link that records the application on our server and then sends you to the employer's job page
+const goHref = (id, confirmRisky) => `/go/${id}${confirmRisky ? '?confirm=1' : ''}`;
+
+function applyControl(d) {
+  const j = d.job, here = `#/job/${j.id}`;
+  const link = (href, label) => `<a class="btn primary" id="apply" href="${href}">${label}</a>`;
+  if (!state.user) return link(`#/signup?next=${encodeURIComponent(here)}`, `Sign up to apply · first ${d.trial.limit} free`);
+  if (!state.user.resume_name && !state.user.is_admin) return link('#/profile', 'Add your resume to apply');
+  if (!(d.applied || d.paid || d.free)) return link(`#/pricing?need=${j.segment}`, 'Get a pass to apply');
+  const label = d.applied ? `Applied ✓ · open ${esc(j.apply_host)} again` : d.paid ? `Apply on ${esc(j.apply_host)} ↗` : `Apply free on ${esc(j.apply_host)} ↗`;
+  return `<a class="btn primary" id="apply" data-go href="${goHref(j.id, d.report.level === 'risky')}" target="_blank" rel="noopener">${label}</a>`;
+}
+
 async function jobPage(id) {
   const d = await api('/api/jobs/' + id), j = d.job;
   $app.innerHTML = `
@@ -214,10 +227,7 @@ async function jobPage(id) {
       <div class="tags"><span class="tag seg">${esc(d.segment.name)} pass</span>${j.category ? `<span class="tag">${esc(j.category)}</span>` : ''}<span class="tag">${salary(j)}</span>
         ${j.match != null ? `<span class="tag ${j.match >= 50 ? 'ok' : ''}">Skill match ${j.match}%</span>` : ''}</div>
       <div class="acts" style="margin-top:16px;align-items:center">
-        <button type="button" class="btn primary" id="apply">${d.applied ? `Applied ✓ · open ${esc(j.apply_host)} again`
-          : !state.user ? `Sign up to apply · first ${d.trial.limit} free`
-          : d.paid ? `Apply on ${esc(j.apply_host)} ↗`
-          : d.free ? `Apply free on ${esc(j.apply_host)} ↗` : 'Get a pass to apply'}</button>
+        ${applyControl(d)}
         <span class="hint">${!d.applied && state.user && d.free
           ? `This uses free application ${d.trial.used + 1} of ${d.trial.limit}. You apply on the employer's own page (${esc(j.apply_host)}).`
           : `You apply on the employer's original page (${esc(j.apply_host)}). We never ask you for money.`}</span></div>
@@ -234,25 +244,16 @@ async function jobPage(id) {
       <div class="card"><h2>Company background check</h2>${reportHtml(d.company, d.report, d.unlocked)}</div>
     </div>`;
 
-  $('#apply').addEventListener('click', async () => {
-    if (!state.user) { location.hash = '#/signup?next=' + encodeURIComponent(location.hash); return; }
-    try {
-      let r;
-      try { r = await api(`/api/jobs/${id}/apply`, { method: 'POST', body: {} }); }
-      catch (e) {
-        if (e.data?.code !== 'RISKY' || !confirm(e.message)) throw e;
-        r = await api(`/api/jobs/${id}/apply`, { method: 'POST', body: { confirmRisky: true } });
-      }
-      window.open(r.apply_url, '_blank', 'noopener');
+  // The link itself opens the employer's page in a new tab; here we only confirm risky jobs and refresh the counts.
+  $('#apply[data-go]')?.addEventListener('click', async e => {
+    if (d.report.level === 'risky' && !confirm('This job failed our background check. Open it anyway?')) { e.preventDefault(); return; }
+    const usedFree = !d.applied && !d.paid && d.free;
+    setTimeout(async () => {
       await loadMe();
-      await jobPage(id);
-      toast(r.free ? `Free application ${r.trial.used} of ${r.trial.limit} used. Opened the employer's page.${r.trial.left ? '' : ' Your next application needs a pass.'}`
-        : 'Opened the employer\'s page. We added it to your applications.');
-    } catch (e) {
-      if (e.data?.code === 'NEED_PLAN') { location.hash = '#/pricing?need=' + e.data.segment; return; }
-      if (e.data?.code === 'NO_RESUME') { toast(e.message); location.hash = '#/profile'; return; }
-      toast(e.message);
-    }
+      if (location.hash.startsWith(`#/job/${id}`)) await jobPage(id);
+      toast(usedFree ? `Free application ${state.trial.used} of ${state.trial.limit} used. The employer's page opened in a new tab.${state.trial.left ? '' : ' Your next application needs a pass.'}`
+        : 'The employer\'s page opened in a new tab. It\'s saved in your applications.');
+    }, 800);
   });
   const report = async (kind, note = '') => {
     try { await api(`/api/companies/${d.company.id}/report`, { method: 'POST', body: { kind, note, job_id: j.id } }); toast('Thanks. Your report updates this company\'s score.'); }
@@ -393,14 +394,28 @@ function authPage(mode) {
         <div class="field full"><label for="aEmail">Email</label><input id="aEmail" name="email" type="email" autocomplete="email" required></div>
         <div class="field full"><label for="aPass">Password</label><input id="aPass" name="password" type="password" minlength="8" autocomplete="${mode === 'login' ? 'current-password' : 'new-password'}" required aria-describedby="aPassHint">
           <span class="hint" id="aPassHint">At least 8 characters.</span></div>
+        ${mode === 'signup' ? `<div class="field full"><span class="sub" style="font-size:13px;margin:0">Resume</span>
+          <label class="drop" id="aDrop" for="aResume"><b id="aResumeName">Upload your resume</b><span>PDF or Word, up to 5 MB. Drag it here or click. Employers see it when you apply.</span></label>
+          <input id="aResume" name="resume" type="file" accept=".pdf,.doc,.docx" class="sr-only" aria-label="Resume file, PDF or Word, up to 5 MB"></div>` : ''}
         <div class="field full"><button class="btn primary">${mode === 'login' ? 'Log in' : 'Create account'}</button></div>
       </div>
       <p class="hint" style="margin-top:14px">${mode === 'login' ? 'New here? <a href="#/signup">Create an account</a>' : 'Already have an account? <a href="#/login">Log in</a>'}</p>
     </form>`;
   const f = $('#authForm');
+  const resume = $('#aResume');
+  if (resume) {
+    const show = () => { $('#aResumeName').textContent = resume.files[0] ? `✓ ${resume.files[0].name}` : 'Upload your resume'; };
+    resume.addEventListener('change', show);
+    const drop = $('#aDrop');
+    ['dragenter', 'dragover'].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.add('over'); }));
+    ['dragleave', 'drop'].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.remove('over'); }));
+    drop.addEventListener('drop', e => { if (e.dataTransfer.files[0]) { resume.files = e.dataTransfer.files; show(); } });
+  }
   f.addEventListener('submit', async e => {
     e.preventDefault();
-    try { await api('/api/' + mode, { method: 'POST', body: Object.fromEntries(new FormData(f)) }); await loadMe(); location.hash = next; }
+    // Sign-up sends the form with the resume file (the server asks for it); log-in sends just email and password
+    const body = mode === 'signup' ? new FormData(f) : Object.fromEntries(new FormData(f));
+    try { await api('/api/' + mode, { method: 'POST', body }); await loadMe(); location.hash = next; }
     catch (err) { toast(err.message); }
   });
 }

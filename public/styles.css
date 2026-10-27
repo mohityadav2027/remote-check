@@ -31,7 +31,7 @@ main:focus { outline: none; }
 .mono { font-family: var(--f-mono); font-variant-numeric: tabular-nums; }
 .eyebrow { font: 600 12px/1.4 var(--f-body); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
 .muted, .hint { color: var(--muted); } .hint { font-size: 13px; }
-.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.sr-only { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important; margin: -1px; border: 0 !important; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .skip-link { position: absolute; left: 12px; top: -60px; z-index: 70; background: var(--accent); color: var(--accent-ink); padding: 8px 14px; border-radius: 8px; font-weight: 600; text-decoration: none; }
 .skip-link:focus { top: 12px; }
 
