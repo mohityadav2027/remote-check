@@ -147,3 +147,13 @@ test('scam scanner flags common scam messages and passes genuine ones', () => {
   assert.equal(textChecks('Remote React developer. Apply at https://boards.greenhouse.io/acme/jobs/1 or write to jobs@acme.com').length, 0);
   assert.equal(textChecks('Amazon is hiring. Apply on https://www.amazon.jobs/en/jobs/123').length, 0, 'real Amazon post flagged');
 });
+
+test('every kind of job gets a sensible plan, not just engineering', () => {
+  const { classifySegment } = require('../lib/pricing');
+  const expected = {
+    basic: ['Data Entry Operator', 'AI Data Annotator', 'Virtual Assistant', 'Customer Support Specialist', 'Online English Tutor', 'Transcriptionist', 'Content Moderator', 'Content Writer'],
+    pro: ['Social Media Manager', 'Bookkeeper', 'Video Editor', 'Graphic Designer', 'HR Recruiter', 'Translator (Hindi-English)', 'Medical Coder', 'Account Executive', 'Frontend Developer', 'Project Manager'],
+    premium: ['Senior Backend Engineer', 'Machine Learning Engineer', 'Engineering Manager', 'Head of Marketing', 'Data Scientist'],
+  };
+  for (const [seg, titles] of Object.entries(expected)) for (const t of titles) assert.equal(classifySegment(t), seg, t);
+});

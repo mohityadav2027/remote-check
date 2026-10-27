@@ -123,6 +123,7 @@ app.put('/api/profile/applications/:jobId', auth, (req, res) => {
 });
 
 // ---------- jobs ----------
+let visibleCategories = null;
 app.get('/api/jobs', (req, res) => {
   const user = currentUser(req);
   const { q = '', segment = '', category = '', minScore = '', showRisky = '' } = req.query;
@@ -144,7 +145,9 @@ app.get('/api/jobs', (req, res) => {
     return { ...rest, snippet: (description || '').slice(0, 180), trust_score: score, trust_level: level, match: matchScore(user, j) };
   }).filter(j => (showRisky === '1' || j.trust_level !== 'risky') && j.trust_score >= (Number(minScore) || 0));
 
-  const categories = db.prepare(`SELECT DISTINCT category FROM jobs WHERE status='open' AND category IS NOT NULL ORDER BY category`).all().map(r => r.category);
+  // Category menu: only categories that have jobs people can see (remembered from the last unfiltered list)
+  if (!q && !segment && !category) visibleCategories = [...new Set(jobs.map(j => j.category).filter(Boolean))].sort();
+  const categories = visibleCategories ?? db.prepare(`SELECT DISTINCT category FROM jobs WHERE status='open' AND category IS NOT NULL ORDER BY category`).all().map(r => r.category);
   res.json({ jobs: jobs.slice(0, 100), categories, hidden_risky: blocked.length, blocked: blocked.slice(0, 10),
     companies: new Set(jobs.map(j => j.company_id)).size,
     last_refresh: db.prepare('SELECT MAX(last_run) t FROM source_status WHERE error IS NULL').get().t });
