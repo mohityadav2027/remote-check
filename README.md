@@ -26,6 +26,12 @@ Sign up with the `ADMIN_EMAIL` address to get the **Admin** page. There you can 
 
 The score runs from 0 to 100: **Verified** is 70 or more, **Check carefully** is 45–69, **Risky** is below 45. Risky jobs are hidden from the job list.
 
+## Indian companies
+- The jobs page has an **Indian companies** filter (companies whose HQ country is India).
+- Every real Indian company is registered with the Ministry of Corporate Affairs and has a **CIN** (or an **LLPIN** for an LLP). Add it on Admin → Add company (copy it from mca.gov.in). The background check reads it: listed or unlisted, state, year of incorporation, company type. A valid CIN raises the score. A malformed one is a strong scam sign. An Indian company with no CIN on record loses a few points.
+- **Scan a job** has a CIN box, and warns when a message says "Pvt Ltd" but gives no CIN.
+- The format check can't confirm that the number belongs to that company. The report tells people to check the name on mca.gov.in.
+
 ## Sign-up and applying
 - **Sign-up asks for a resume** (PDF or Word, up to 5 MB), so applying never stops to ask for one. The admin account (`ADMIN_EMAIL`) can sign up without one.
 - **Apply opens the employer's page straight away.** The Apply button is a normal link to `/go/<job id>`, opened in a new tab. The server checks the free trial or pass, records the application, and redirects to the employer's job page (LinkedIn, Greenhouse, Lever, company careers page). Because it's a real link, browsers don't block it the way they block pop-up windows.

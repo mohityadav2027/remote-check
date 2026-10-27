@@ -173,3 +173,18 @@ test('every kind of job gets a sensible plan, not just engineering', () => {
   };
   for (const [seg, titles] of Object.entries(expected)) for (const t of titles) assert.equal(classifySegment(t), seg, t);
 });
+
+test('Indian company registration numbers (CIN / LLPIN) are read and checked', () => {
+  const { parseRegistration } = require('../lib/verify');
+  const infosys = parseRegistration('L85110KA1981PLC013115');
+  assert.equal(infosys.valid, true);
+  assert.equal(infosys.listed, true);
+  assert.equal(infosys.state, 'Karnataka');
+  assert.equal(infosys.year, 1981);
+  assert.equal(infosys.type, 'Public limited company');
+  assert.equal(parseRegistration('u72900ka2013ptc000101').type, 'Private limited company');
+  assert.equal(parseRegistration('AAB-1234').kind, 'llp');
+  for (const bad of ['12345', 'U72900ZZ2013PTC000101', 'U72900KA2099PTC000101', 'X72900KA2013PTC000101', 'U72900KA2013ABC000101'])
+    assert.equal(parseRegistration(bad).valid, false, bad);
+  assert.equal(parseRegistration(''), null);
+});

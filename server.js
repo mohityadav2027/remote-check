@@ -10,7 +10,7 @@ const bcrypt = require('bcryptjs');
 const db = require('./lib/db');
 const seed = require('./lib/seed');
 const { SEGMENTS, PLAN_DAYS, priceList, classifySegment, planCovers } = require('./lib/pricing');
-const { scoreCompany, refreshDomainAge, domainCreated, hostOf, registrableDomain, textChecks, RED_FLAGS } = require('./lib/verify');
+const { scoreCompany, refreshDomainAge, domainCreated, hostOf, registrableDomain, textChecks, RED_FLAGS, parseRegistration } = require('./lib/verify');
 const payments = require('./lib/payments');
 const { runImport } = require('./lib/importer');
 const { BOARDS, parseCareersUrl } = require('./lib/sources');
@@ -138,13 +138,13 @@ app.put('/api/profile/applications/:jobId', auth, (req, res) => {
 let visibleCategories = null;
 app.get('/api/jobs', (req, res) => {
   const user = currentUser(req);
-  const { q = '', segment = '', category = '', minScore = '', showRisky = '' } = req.query;
-  const rows = db.prepare(`SELECT j.*, c.name company_name, c.founded_year, c.hq_country FROM jobs j JOIN companies c ON c.id=j.company_id
+  const { q = '', segment = '', category = '', hq = '', minScore = '', showRisky = '' } = req.query;
+  const rows = db.prepare(`SELECT j.*, c.name company_name, c.founded_year, c.hq_country, c.hq_city FROM jobs j JOIN companies c ON c.id=j.company_id
     WHERE j.status='open' AND j.india_eligible=1
       AND (? = '' OR j.title LIKE ? OR j.tags LIKE ? OR c.name LIKE ?)
-      AND (? = '' OR j.segment = ?) AND (? = '' OR j.category = ?)
+      AND (? = '' OR j.segment = ?) AND (? = '' OR j.category = ?) AND (? = '' OR lower(c.hq_country) = lower(?))
     ORDER BY j.posted_at DESC LIMIT 300`)
-    .all(q, `%${q}%`, `%${q}%`, `%${q}%`, segment, segment, category, category);
+    .all(q, `%${q}%`, `%${q}%`, `%${q}%`, segment, segment, category, category, hq, hq);
 
   const companyCache = {};
   const blocked = [];
@@ -158,7 +158,7 @@ app.get('/api/jobs', (req, res) => {
   }).filter(j => (showRisky === '1' || j.trust_level !== 'risky') && j.trust_score >= (Number(minScore) || 0));
 
   // Category menu: only categories that have jobs people can see (remembered from the last unfiltered list)
-  if (!q && !segment && !category) visibleCategories = [...new Set(jobs.map(j => j.category).filter(Boolean))].sort();
+  if (!q && !segment && !category && !hq) visibleCategories = [...new Set(jobs.map(j => j.category).filter(Boolean))].sort();
   const categories = visibleCategories ?? db.prepare(`SELECT DISTINCT category FROM jobs WHERE status='open' AND category IS NOT NULL ORDER BY category`).all().map(r => r.category);
   res.json({ jobs: jobs.slice(0, 100), categories, hidden_risky: blocked.length, blocked: blocked.slice(0, 10),
     companies: new Set(jobs.map(j => j.company_id)).size,
@@ -262,6 +262,7 @@ app.post('/api/scan', ah(async (req, res) => {
   const text = String(req.body?.text || '').slice(0, 6000).trim();
   const company = String(req.body?.company || '').trim().slice(0, 80);
   const website = String(req.body?.website || '').trim().slice(0, 120);
+  const cin = String(req.body?.cin || '').trim().slice(0, 30);
   if (text.length < 30) return res.status(400).json({ error: 'Paste the full job post or message, at least a few lines.' });
 
   const hits = textChecks(text, website);
@@ -272,6 +273,17 @@ app.post('/api/scan', ah(async (req, res) => {
   for (const h of hits) if (!RED_FLAGS.some(r => r.label === h.label)) checks.unshift({ label: h.label, status: h.level, detail: h.why });
 
   let score = 80 - hits.reduce((s, h) => s + h.impact, 0);
+  // Indian company registration (CIN / LLPIN), if the recruiter gave one
+  const reg = parseRegistration(cin);
+  if (reg) {
+    if (!reg.valid) score -= 30;
+    checks.push({ label: 'Company registration (CIN)', status: reg.valid ? 'ok' : 'bad',
+      detail: reg.valid ? `${reg.detail} Make sure the name on mca.gov.in matches the company in the message.`
+        : `"${cin}" is not a valid CIN or LLPIN. Every real Indian company has one; a made-up number is a strong scam sign.` });
+  } else if (/\b(pvt\.?|private)\s*(ltd|limited)\b/i.test(text)) {
+    checks.push({ label: 'Company registration (CIN)', status: 'warn',
+      detail: 'The message says "Pvt Ltd" but gives no CIN. Ask for it and look it up on mca.gov.in.' });
+  }
   const created = website ? await domainCreated(website) : null;
   if (website) {
     const days = created ? (Date.now() - Date.parse(created)) / 864e5 : null;
@@ -294,7 +306,8 @@ app.post('/api/scan', ah(async (req, res) => {
   }
   score = Math.max(0, Math.min(100, score));
   const bad = hits.filter(h => h.level === 'bad').length;
-  const verdict = bad >= 2 || score < 45 ? 'scam' : bad === 1 || score < 70 ? 'suspicious' : 'clear';
+  const badReg = reg && !reg.valid ? 1 : 0;
+  const verdict = bad + badReg >= 2 || score < 45 ? 'scam' : bad + badReg === 1 || score < 70 ? 'suspicious' : 'clear';
   res.json({ score, verdict, checks, known: knownCompany });
 }));
 
@@ -360,13 +373,15 @@ app.post('/api/admin/companies', admin, ah(async (req, res) => {
   if (!b.name) return res.status(400).json({ error: 'Name required' });
   const careers = b.careers_url ? parseCareersUrl(b.careers_url) : null;
   if (b.careers_url && !careers) return res.status(400).json({ error: 'Careers link must be a Greenhouse, Lever or Ashby job board, e.g. https://jobs.lever.co/company' });
-  db.prepare(`INSERT INTO companies (name, website, linkedin_url, founded_year, employee_count, hq_country, description, verified_by_admin, ats_type, ats_board)
-    VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(name) DO UPDATE SET website=excluded.website, linkedin_url=excluded.linkedin_url,
-    founded_year=excluded.founded_year, employee_count=excluded.employee_count, hq_country=excluded.hq_country,
-    description=excluded.description, verified_by_admin=excluded.verified_by_admin,
+  const reg = parseRegistration(b.cin);
+  if (reg && !reg.valid) return res.status(400).json({ error: 'That isn\'t a valid CIN (e.g. U72900KA2013PTC123456) or LLPIN (e.g. AAB-1234). Copy it from mca.gov.in.' });
+  db.prepare(`INSERT INTO companies (name, website, linkedin_url, founded_year, employee_count, hq_country, hq_city, cin, description, verified_by_admin, ats_type, ats_board)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(name) DO UPDATE SET website=excluded.website, linkedin_url=excluded.linkedin_url,
+    founded_year=excluded.founded_year, employee_count=excluded.employee_count, hq_country=excluded.hq_country, hq_city=excluded.hq_city,
+    cin=excluded.cin, description=excluded.description, verified_by_admin=excluded.verified_by_admin,
     ats_type=COALESCE(excluded.ats_type, companies.ats_type), ats_board=COALESCE(excluded.ats_board, companies.ats_board)`)
     .run(b.name.trim(), b.website || null, b.linkedin_url || null, Number(b.founded_year) || null, Number(b.employee_count) || null,
-      b.hq_country || null, b.description || null, b.verified_by_admin ? 1 : 0, careers?.type || null, careers?.board || null);
+      b.hq_country || null, b.hq_city || null, reg?.id || null, b.description || null, b.verified_by_admin ? 1 : 0, careers?.type || null, careers?.board || null);
   const c = await refreshDomainAge({ ...db.prepare('SELECT * FROM companies WHERE name=?').get(b.name.trim()), domain_checked_at: null });
   res.json({ company: c });
 }));

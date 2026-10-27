@@ -63,7 +63,7 @@ async function jobsPage() {
   $app.innerHTML = `
     <section class="hero">
       <div>
-        <p class="eyebrow">For Indian professionals · International companies · Remote</p>
+        <p class="eyebrow">For Indian professionals · International &amp; Indian companies · Remote</p>
         <h1>Every remote job, <em>background-checked</em> before you apply.</h1>
         <p class="lede">We check each company's founding year, website age, how many jobs it posts, how many it fills, and whether the apply link is on the company's own hiring system. You apply on the employer's page.</p>
         <p class="lede"><b>Your first ${freeN()} applications are free</b>, with the full background check. ${state.user ? '' : '<a href="#/signup">Create a free account</a>'}</p>
@@ -75,6 +75,7 @@ async function jobsPage() {
       <input id="q" name="q" type="search" placeholder="Search role, skill or company" value="${esc(p.get('q'))}">
       <div class="chips" role="group" aria-label="Filter by plan">${[['', 'All'], ...Object.entries(SEG)].map(([k, l]) =>
         `<button type="button" class="chip" data-seg="${k}" aria-pressed="${(p.get('segment') || '') === k}">${l}</button>`).join('')}</div>
+      <button type="button" class="chip" id="hqIndia" aria-pressed="${p.get('hq') === 'India'}">Indian companies</button>
       <label for="category" class="sr-only">Category</label>
       <select id="category" name="category"><option value="">All categories</option></select>
       <span class="count" id="count" role="status"></span>
@@ -84,7 +85,7 @@ async function jobsPage() {
     <p class="sources" id="sources"></p>`;
 
   const f = $('#filters');
-  const filters = { q: p.get('q') || '', segment: p.get('segment') || '', category: p.get('category') || '' };
+  const filters = { q: p.get('q') || '', segment: p.get('segment') || '', category: p.get('category') || '', hq: p.get('hq') || '' };
   const update = () => {
     const qs = new URLSearchParams(Object.entries(filters).filter(([, v]) => v)).toString();
     history.replaceState(null, '', '#/' + (qs ? '?' + qs : ''));
@@ -98,6 +99,11 @@ async function jobsPage() {
     update();
   }));
   f.category.addEventListener('change', () => { filters.category = f.category.value; update(); });
+  $('#hqIndia').addEventListener('click', e => {
+    filters.hq = filters.hq ? '' : 'India';
+    e.currentTarget.setAttribute('aria-pressed', Boolean(filters.hq));
+    update();
+  });
 
   await loadJobs(filters, true);
   api('/api/sources').then(({ sources }) => {
@@ -119,7 +125,7 @@ async function loadJobs(filters, first = false) {
       <div style="min-width:0">
         <h2><a href="#/job/${j.id}">${esc(j.title)}</a></h2>
         <div class="co"><button type="button" class="linkbtn" data-company="${j.company_id}">${esc(j.company_name)}</button>
-          <span>${remoteWhere(j.location)}</span>${j.hq_country ? `<span>HQ ${esc(j.hq_country)}</span>` : ''}${j.founded_year ? `<span>Founded ${j.founded_year}</span>` : ''}</div>
+          <span>${remoteWhere(j.location)}</span>${j.hq_country ? `<span>HQ ${j.hq_city ? esc(j.hq_city) + ', ' : ''}${esc(j.hq_country)}</span>` : ''}${j.founded_year ? `<span>Founded ${j.founded_year}</span>` : ''}</div>
         <div class="tags"><span class="tag seg">${SEG[j.segment]}</span>${j.category ? `<span class="tag">${esc(j.category)}</span>` : ''}
           ${j.match != null ? `<span class="tag ${j.match >= 50 ? 'ok' : ''}">Skill match ${j.match}%</span>` : ''}<span class="tag">via ${esc(j.source)}</span><span class="tag">${esc(ago(j.posted_at))}</span></div>
       </div>
@@ -140,7 +146,9 @@ function reportHtml(c, r, unlocked) {
     <div><dt>Founded</dt><dd>${c.founded_year ? `${c.founded_year} (${year - c.founded_year} yrs)` : 'Not public'}</dd></div>
     <div><dt>Team size</dt><dd>${c.employee_count ? `${c.employee_count} people` : 'Not public'}</dd></div>
     <div><dt>Website since</dt><dd>${c.domain_created ? fmtDate(c.domain_created) : c.website ? 'Not checked yet' : 'No website'}</dd></div>
-    <div><dt>Hiring system</dt><dd>${c.ats_type ? `${ATS[c.ats_type]} careers page` : 'Job boards'}</dd></div></dl>`;
+    <div><dt>Hiring system</dt><dd>${c.ats_type ? `${ATS[c.ats_type]} careers page` : 'Job boards'}</dd></div>
+    <div><dt>Headquarters</dt><dd>${c.hq_country ? `${c.hq_city ? esc(c.hq_city) + ', ' : ''}${esc(c.hq_country)}` : 'Not public'}</dd></div>
+    <div><dt>${/^india$/i.test(c.hq_country || '') || c.cin ? 'Indian registration (CIN)' : 'Registration'}</dt><dd>${c.cin ? esc(c.cin) : /^india$/i.test(c.hq_country || '') ? 'Not on record' : 'Outside India'}</dd></div></dl>`;
   const checks = `<ul class="checks">${r.signals.map(x => `<li>${stIcon(x.impact > 0 ? 'ok' : x.impact <= -8 ? 'bad' : x.impact < 0 ? 'warn' : 'n')}
     <span>${esc(x.label)}</span><span class="val">${x.impact > 0 ? '+' : ''}${x.impact}</span>${x.detail ? `<span class="det">${esc(x.detail)}</span>` : ''}</li>`).join('')}</ul>`;
   if (!unlocked) return `<div class="report-grid">${facts}<div><p class="sub">Checks</p>${checks}</div>
@@ -277,6 +285,8 @@ function scanPage() {
         <div class="fields">
           <div class="field"><label for="scCompany">Company name</label><input id="scCompany" name="company" placeholder="e.g. GlobalEarn Partners" autocomplete="off"></div>
           <div class="field"><label for="scSite">Company website (if given)</label><input id="scSite" name="website" placeholder="e.g. globalearn-partners.online" autocomplete="off"></div>
+          <div class="field full"><label for="scCin">Company registration number (CIN), if given</label><input id="scCin" name="cin" placeholder="e.g. U72900KA2013PTC123456" autocomplete="off" aria-describedby="scCinHint">
+            <span class="hint" id="scCinHint">Every Indian company has one. Ask the recruiter for it if they say "Pvt Ltd".</span></div>
           <div class="field full"><label for="scText">Job post or message</label>
             <textarea id="scText" name="text" aria-describedby="scHint">${esc(SAMPLE_SCAM)}</textarea>
             <span class="hint" id="scHint">The example above is a typical scam message. Replace it with yours.</span></div>
@@ -296,7 +306,7 @@ function scanPage() {
     $('#scanBtn').disabled = true;
     $('#scanChecks').innerHTML = `<li><span class="st run" aria-hidden="true"></span><span>Checking…</span><span></span></li>`;
     try {
-      const r = await api('/api/scan', { method: 'POST', body: { company: f.company.value, website: f.website.value, text: f.text.value } });
+      const r = await api('/api/scan', { method: 'POST', body: { company: f.company.value, website: f.website.value, cin: f.cin.value, text: f.text.value } });
       $('#scanChecks').innerHTML = r.checks.map(k => `<li>${stIcon(k.status)}<span>${esc(k.label)}</span>
         <span class="val">${k.label === 'Website age' ? '' : k.status === 'ok' ? 'not found' : 'found'}</span>${k.detail ? `<span class="det">${esc(k.detail)}</span>` : ''}</li>`).join('');
       const level = r.verdict === 'clear' ? 'verified' : r.verdict === 'suspicious' ? 'caution' : 'risky';
@@ -529,7 +539,10 @@ async function adminPage() {
         <div class="field"><label for="cLi">LinkedIn page</label><input id="cLi" name="linkedin_url" type="url"></div>
         <div class="field"><label for="cYear">Founded year</label><input id="cYear" name="founded_year" type="number" min="1800" max="2100"></div>
         <div class="field"><label for="cSize">Employees</label><input id="cSize" name="employee_count" type="number" min="1"></div>
-        <div class="field"><label for="cHq">HQ country</label><input id="cHq" name="hq_country"></div>
+        <div class="field"><label for="cHq">HQ country</label><input id="cHq" name="hq_country" placeholder="e.g. India"></div>
+        <div class="field"><label for="cCity">HQ city</label><input id="cCity" name="hq_city" placeholder="e.g. Bengaluru"></div>
+        <div class="field"><label for="cCin">CIN or LLPIN (Indian companies)</label><input id="cCin" name="cin" placeholder="U72900KA2013PTC123456" aria-describedby="cCinHint">
+          <span class="hint" id="cCinHint">Copy it from mca.gov.in. We check that it's valid and show what it says.</span></div>
         <div class="field full"><label for="cCareers">Careers page (Greenhouse, Lever or Ashby)</label><input id="cCareers" name="careers_url" type="url" placeholder="https://jobs.lever.co/company" aria-describedby="cCareersHint">
           <span class="hint" id="cCareersHint">Jobs here are imported straight from the employer, and marked closed when they come down.</span></div>
         <div class="field full"><label for="cAbout">About</label><textarea id="cAbout" name="description" style="min-height:80px"></textarea></div>
