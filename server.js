@@ -10,7 +10,7 @@ const bcrypt = require('bcryptjs');
 const db = require('./lib/db');
 const seed = require('./lib/seed');
 const { SEGMENTS, PLAN_DAYS, priceList, classifySegment, planCovers } = require('./lib/pricing');
-const { scoreCompany, refreshDomainAge, domainCreated, hostOf, registrableDomain, textChecks, RED_FLAGS, parseRegistration } = require('./lib/verify');
+const { MIN_SCORE, scoreCompany, refreshDomainAge, domainCreated, hostOf, registrableDomain, textChecks, RED_FLAGS, parseRegistration } = require('./lib/verify');
 const payments = require('./lib/payments');
 const { runImport } = require('./lib/importer');
 const { BOARDS, parseCareersUrl } = require('./lib/sources');
@@ -156,12 +156,13 @@ app.get('/api/jobs', (req, res) => {
       why: signals.filter(x => x.impact < 0).sort((a, b) => a.impact - b.impact).slice(0, 3).map(x => x.label).join(' · ') });
     const { apply_url, description, ...rest } = j;
     return { ...rest, snippet: (description || '').slice(0, 180), trust_score: score, trust_level: level, match: matchScore(user, j) };
-  }).filter(j => (showRisky === '1' || j.trust_level !== 'risky') && j.trust_score >= (Number(minScore) || 0));
+  // Jobs under MIN_SCORE (level 'risky') are never posted; only the admin can list them, to review
+  }).filter(j => ((showRisky === '1' && user?.is_admin) || j.trust_score >= MIN_SCORE) && j.trust_score >= (Number(minScore) || 0));
 
   // Category menu: only categories that have jobs people can see (remembered from the last unfiltered list)
   if (!q && !segment && !category && !hq) visibleCategories = [...new Set(jobs.map(j => j.category).filter(Boolean))].sort();
   const categories = visibleCategories ?? db.prepare(`SELECT DISTINCT category FROM jobs WHERE status='open' AND category IS NOT NULL ORDER BY category`).all().map(r => r.category);
-  res.json({ jobs: jobs.slice(0, 100), categories, hidden_risky: blocked.length, blocked: blocked.slice(0, 10),
+  res.json({ jobs: jobs.slice(0, 100), categories, min_score: MIN_SCORE, hidden_risky: blocked.length, blocked: blocked.slice(0, 10),
     companies: new Set(jobs.map(j => j.company_id)).size,
     last_refresh: db.prepare('SELECT MAX(last_run) t FROM source_status WHERE error IS NULL').get().t });
 });
@@ -173,6 +174,7 @@ app.get('/api/jobs/:id', ah(async (req, res) => {
   let company = db.prepare('SELECT * FROM companies WHERE id=?').get(job.company_id);
   company = await refreshDomainAge(company);
   const report = scoreCompany(company, job);
+  if (report.score < MIN_SCORE) return res.status(410).json({ code: 'REMOVED', ...removedReason(job, report) });
   const applied = Boolean(user && hasApplied(user.id, job.id));
   const paid = Boolean(user && (user.is_admin || hasAccess(user.id, job.segment)));
   // Free-trial users see the full background check on any job they can still apply to for free
@@ -191,26 +193,32 @@ app.get('/api/jobs/:id', ah(async (req, res) => {
   });
 }));
 
+// Jobs scoring under MIN_SCORE are not posted: no listing, no job page, no apply link.
+function removedReason(job, report) {
+  const why = report.signals.filter(s => s.impact < 0).sort((a, b) => a.impact - b.impact).slice(0, 3).map(s => s.label);
+  return { error: `"${job.title}" was removed. It scored ${report.score}/100 in our background check; we only post jobs scoring ${MIN_SCORE} or more.`
+    + (why.length ? ` Reasons: ${why.join('; ')}.` : ''), score: report.score, reasons: why };
+}
+
 // Applying happens on the ORIGINAL site (LinkedIn, Greenhouse, company careers…). We check, track and redirect.
 // Returns { ok, job, free } or { status, code, error, segment }.
-function tryApply(user, jobId, confirmRisky) {
+function tryApply(user, jobId) {
   const job = db.prepare('SELECT * FROM jobs WHERE id=?').get(jobId);
   if (!job) return { status: 404, error: 'Job not found' };
+  const report = scoreCompany(db.prepare('SELECT * FROM companies WHERE id=?').get(job.company_id), job);
+  if (report.score < MIN_SCORE) return { status: 410, code: 'REMOVED', ...removedReason(job, report) };
   if (!user.resume_path && !user.is_admin) return { status: 400, code: 'NO_RESUME', error: 'Upload your resume in your profile before applying' };
   const paid = user.is_admin || hasAccess(user.id, job.segment);
   const again = hasApplied(user.id, job.id);   // opening a job you already applied to never costs anything
   if (!paid && !again && trialInfo(user.id).left === 0)
     return { status: 402, code: 'NEED_PLAN', segment: job.segment,
       error: `You've used your ${FREE_APPLIES} free applications. This job needs the ${SEGMENTS[job.segment].name} pass.` };
-  const company = db.prepare('SELECT * FROM companies WHERE id=?').get(job.company_id);
-  if (scoreCompany(company, job).level === 'risky' && !confirmRisky)
-    return { status: 409, code: 'RISKY', error: 'This job failed our background check. Are you sure?' };
   db.prepare('INSERT OR IGNORE INTO applications (user_id, job_id) VALUES (?,?)').run(user.id, job.id);
   return { ok: true, job, free: !paid && !again };
 }
 
 app.post('/api/jobs/:id/apply', auth, (req, res) => {
-  const r = tryApply(req.user, req.params.id, req.body?.confirmRisky);
+  const r = tryApply(req.user, req.params.id);
   if (!r.ok) return res.status(r.status).json({ error: r.error, code: r.code, segment: r.segment });
   res.json({ apply_url: r.job.apply_url, free: r.free, trial: trialInfo(req.user.id) });
 });
@@ -221,7 +229,7 @@ app.get('/go/:id', (req, res) => {
   const user = currentUser(req);
   const back = `/#/job/${encodeURIComponent(req.params.id)}`;
   if (!user) return res.redirect('/#/signup?next=' + encodeURIComponent(back.slice(1)));
-  const r = tryApply(user, req.params.id, req.query.confirm === '1');
+  const r = tryApply(user, req.params.id);
   if (r.ok) return res.redirect(r.job.apply_url);
   if (r.code === 'NEED_PLAN') return res.redirect(`/#/pricing?need=${r.segment}`);
   if (r.code === 'NO_RESUME') return res.redirect('/#/profile');
@@ -236,7 +244,10 @@ app.get('/api/companies/:id', ah(async (req, res) => {
   company = await refreshDomainAge(company);
   const unlocked = Boolean(user && (user.is_admin || activePlans(user.id).length || trialInfo(user.id).left > 0));
   const report = scoreCompany(company);
-  const jobs = db.prepare(`SELECT id, title, segment, status, posted_at, closed_at FROM jobs WHERE company_id=? ORDER BY posted_at DESC LIMIT 50`).all(company.id);
+  // Open jobs scoring under the minimum are listed as removed, without a link
+  const jobs = db.prepare(`SELECT * FROM jobs WHERE company_id=? ORDER BY posted_at DESC LIMIT 50`).all(company.id)
+    .map(j => ({ id: j.id, title: j.title, segment: j.segment, status: j.status, posted_at: j.posted_at, closed_at: j.closed_at,
+      removed: j.status === 'open' && scoreCompany(company, j).score < MIN_SCORE }));
   res.json({ company, report: unlocked ? report : { score: report.score, level: report.level, locked: true, signals: report.signals.slice(0, 2), stats: {} }, jobs, unlocked });
 }));
 
@@ -308,7 +319,7 @@ app.post('/api/scan', ah(async (req, res) => {
   score = Math.max(0, Math.min(100, score));
   const bad = hits.filter(h => h.level === 'bad').length;
   const badReg = reg && !reg.valid ? 1 : 0;
-  const verdict = bad + badReg >= 2 || score < 45 ? 'scam' : bad + badReg === 1 || score < 70 ? 'suspicious' : 'clear';
+  const verdict = bad + badReg >= 2 || score < MIN_SCORE ? 'scam' : bad + badReg === 1 || score < 70 ? 'suspicious' : 'clear';
   res.json({ score, verdict, checks, known: knownCompany });
 }));
 

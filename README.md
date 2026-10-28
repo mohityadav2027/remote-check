@@ -24,7 +24,7 @@ Sign up with the `ADMIN_EMAIL` address to get the **Admin** page. There you can 
 | Job text: fees, WhatsApp/Telegram, "earn $X per day", gmail addresses, crypto | Classic scam patterns |
 | Where the apply link goes | Must be a known job board or the company's own domain |
 
-The score runs from 0 to 100: **Verified** is 70 or more, **Check carefully** is 45–69, **Risky** is below 45. Risky jobs are hidden from the job list.
+The score runs from 0 to 100: **Verified** is 70 or more, **Check carefully** is 50–69. **Jobs scoring under 50 are not posted at all**: they're left out of the job list, their job page only says why they were removed, and their Apply link is refused. Company pages mark them "removed: failed checks". Change the minimum with `MIN_SCORE` (for example `MIN_SCORE=60`).
 
 ## Indian companies
 - The jobs page has an **Indian companies** filter (companies whose HQ country is India).
