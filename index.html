@@ -606,7 +606,8 @@ Object.assign(DATA, { list: null, job: {}, company: {}, applyUrl: {}, sources: [
 
 const withTimeout = (p, ms) => Promise.race([p, new Promise((_, no) => setTimeout(() => no(new Error('timed out')), ms))]);
 const daysAgo = d => (Date.now() - Date.parse(d)) / 864e5;
-const level = score => (score >= 70 ? 'verified' : score >= 45 ? 'caution' : 'risky');
+const MIN_SCORE = 50;   // jobs scoring under this are not posted (same rule as the server)
+const level = score => (score >= 70 ? 'verified' : score >= MIN_SCORE ? 'caution' : 'risky');
 
 const READY = (async () => {
   // 1. Fetch every job board at once; any that fail are skipped
@@ -688,15 +689,22 @@ const READY = (async () => {
       tags: (j.tags || []).join(','), posted_at: j.posted_at || new Date().toISOString(), apply_host: host };
     DATA.job[j.id] = { job, company: c.record, segment: SEG_INFO[segment], unlocked: report, locked: lockedOf(report) };
     DATA.applyUrl[j.id] = j.apply_url;
-    if (report.level === 'risky') { blocked.push({ title: j.title, company: c.name, why: signals.filter(x => x.impact < 0).slice(0, 3).map(x => x.label).join(' · ') }); continue; }
+    if (score < MIN_SCORE) {
+      const why = signals.filter(x => x.impact < 0).sort((a, b) => a.impact - b.impact).slice(0, 3).map(x => x.label);
+      DATA.job[j.id].removed = `"${j.title}" was removed. It scored ${score}/100 in our background check; we only post jobs scoring ${MIN_SCORE} or more.`
+        + (why.length ? ` Reasons: ${why.join('; ')}.` : '');
+      blocked.push({ title: j.title, company: c.name, why: why.join(' · ') });
+      continue;
+    }
     list.push({ ...job, company_name: c.name, founded_year: null, hq_country: null, hq_city: null,
       snippet: job.description.slice(0, 180), trust_score: score, trust_level: report.level });
   }
   for (const c of companies.values())
     DATA.company[c.id] = { company: c.record, unlocked: c.report, locked: lockedOf(c.report),
-      jobs: c.jobs.map(j => ({ id: j.id, title: j.title, segment: DATA.job[j.id].job.segment, status: 'open', posted_at: DATA.job[j.id].job.posted_at })) };
+      jobs: c.jobs.map(j => ({ id: j.id, title: j.title, segment: DATA.job[j.id].job.segment, status: 'open', posted_at: DATA.job[j.id].job.posted_at,
+        removed: Boolean(DATA.job[j.id].removed) })) };
   DATA.list = { jobs: list, categories: [...new Set(list.map(j => j.category).filter(Boolean))].sort(), hidden_risky: blocked.length,
-    blocked: blocked.slice(0, 10), companies: new Set(list.map(j => j.company_id)).size, last_refresh: new Date().toISOString() };
+    blocked: blocked.slice(0, 10), min_score: MIN_SCORE, companies: new Set(list.map(j => j.company_id)).size, last_refresh: new Date().toISOString() };
 })();
 </script>
 <script>// Preview-only: answers the site's API calls in the browser. Jobs and companies come from live job boards (live.js);
@@ -836,6 +844,7 @@ window.fetch = async (url, opts = {}) => {
   }
   if ((x = p.match(/^\/api\/jobs\/(\d+)$/))) {
     const d = DATA.job[x[1]]; if (!d) return err(404, 'Job not found');
+    if (d.removed) return err(410, d.removed, { code: 'REMOVED' });
     const applied = mock.apps.some(a => a.job_id == x[1]);
     const paid = Boolean(mock.user && covers(d.job.segment));
     const free = Boolean(mock.user && !paid && (applied || trial().left > 0));
@@ -1005,7 +1014,7 @@ async function loadJobs(filters, first = false) {
   const verified = data.jobs.filter(j => j.trust_level === 'verified').length;
   $('#status').innerHTML = `<span><i class="dot" aria-hidden="true"></i><b>${data.jobs.length} checked job${data.jobs.length === 1 ? '' : 's'}</b> from <b>${data.companies} compan${data.companies === 1 ? 'y' : 'ies'}</b></span>
     <span><b>${verified}</b> verified · <b>${data.jobs.length - verified}</b> to check carefully</span>
-    <span>${data.last_refresh ? `Last refreshed ${esc(ago(data.last_refresh))}` : 'Refreshed every 6 hours'} · risky jobs are hidden</span>`;
+    <span>${data.last_refresh ? `Last refreshed ${esc(ago(data.last_refresh))}` : 'Refreshed every 6 hours'} · jobs scoring under ${data.min_score ?? 50} are not posted</span>`;
   $('#count').textContent = `${data.jobs.length} shown`;
   $('#jobList').innerHTML = data.jobs.length ? data.jobs.map(j => `
     <article class="job">
@@ -1023,7 +1032,7 @@ async function loadJobs(filters, first = false) {
     : `<div class="empty"><b>No verified jobs match that search</b>Try another skill, company or plan.</div>`;
   const b = $('#blocked');
   b.hidden = !data.blocked.length;
-  $('#blockedTitle').textContent = `${data.hidden_risky} job${data.hidden_risky === 1 ? '' : 's'} hidden because they failed our checks`;
+  $('#blockedTitle').textContent = `${data.hidden_risky} job${data.hidden_risky === 1 ? '' : 's'} not posted: scored under ${data.min_score ?? 50} in our checks`;
   $('#blockedList').innerHTML = data.blocked.map(x => `<li><b>${esc(x.title)}</b> at ${esc(x.company)} · ${esc(x.why)}</li>`).join('');
 }
 
@@ -1067,7 +1076,7 @@ async function openCompany(id) {
   $('#drHead').innerHTML = `${seal(d.report.score, d.report.level, 56)}<div style="min-width:0"><h2 id="drTitle">${esc(c.name)}</h2>
     <p class="mono">${esc(domainOf(c.website) || 'no website')}${c.hq_country ? ' · ' + esc(c.hq_country) : ''}</p></div>
     <button type="button" class="btn ghost sm x" id="drClose" aria-label="Close report">✕</button>`;
-  const open = d.jobs.filter(j => j.status === 'open');
+  const open = d.jobs.filter(j => j.status === 'open' && !j.removed);
   $('#drBody').innerHTML = `${c.description ? `<p>${esc(c.description)}</p>` : ''}${reportHtml(c, d.report, d.unlocked)}
     <div><p class="sub">Open jobs here (${open.length})</p>${open.map(j => `<div style="display:flex;justify-content:space-between;gap:10px;padding:10px 0;border-top:1px solid var(--line);font-size:14px">
       <a href="#/job/${j.id}">${esc(j.title)}</a><span class="hint">${esc(SEG[j.segment])}</span></div>`).join('') || '<p class="hint">None open right now.</p>'}</div>
@@ -1095,8 +1104,8 @@ async function companyPage(id) {
       <div><h1>${esc(c.name)}</h1><p>${esc(c.description || domainOf(c.website) || '')}</p></div></div>${pill(d.report.level)}</div>
     <div class="grid2"><div class="card"><h2>Background check</h2>${reportHtml(c, d.report, d.unlocked)}</div>
       <div class="card"><h2>Job history</h2><div class="scroll"><table class="admin"><thead><tr><th scope="col">Role</th><th scope="col">Posted</th><th scope="col">Status</th></tr></thead><tbody>
-        ${d.jobs.map(j => `<tr><td>${j.status === 'open' ? `<a href="#/job/${j.id}">${esc(j.title)}</a>` : esc(j.title)}</td><td class="mono">${fmtDate(j.posted_at)}</td>
-          <td><span class="pill ${j.status === 'open' ? 'ok' : 'n'}">${j.status}</span></td></tr>`).join('')}</tbody></table></div></div></div>`;
+        ${d.jobs.map(j => `<tr><td>${j.status === 'open' && !j.removed ? `<a href="#/job/${j.id}">${esc(j.title)}</a>` : esc(j.title)}</td><td class="mono">${fmtDate(j.posted_at)}</td>
+          <td>${j.removed ? '<span class="pill bad">removed: failed checks</span>' : `<span class="pill ${j.status === 'open' ? 'ok' : 'n'}">${j.status}</span>`}</td></tr>`).join('')}</tbody></table></div></div></div>`;
 }
 
 // ---------- job page ----------
@@ -1110,7 +1119,7 @@ function applyControl(d) {
   if (!state.user.resume_name && !state.user.is_admin) return link('#/profile', 'Add your resume to apply');
   if (!(d.applied || d.paid || d.free)) return link(`#/pricing?need=${j.segment}`, 'Get a pass to apply');
   const label = d.applied ? `Applied ✓ · open ${esc(j.apply_host)} again` : d.paid ? `Apply on ${esc(j.apply_host)} ↗` : `Apply free on ${esc(j.apply_host)} ↗`;
-  return `<a class="btn primary" id="apply" data-go href="${goHref(j.id, d.report.level === 'risky')}" target="_blank" rel="noopener">${label}</a>`;
+  return `<a class="btn primary" id="apply" data-go href="${goHref(j.id)}" target="_blank" rel="noopener">${label}</a>`;
 }
 
 async function jobPage(id) {
@@ -1141,9 +1150,8 @@ async function jobPage(id) {
       <div class="card"><h2>Company background check</h2>${reportHtml(d.company, d.report, d.unlocked)}</div>
     </div>`;
 
-  // The link itself opens the employer's page in a new tab; here we only confirm risky jobs and refresh the counts.
-  $('#apply[data-go]')?.addEventListener('click', async e => {
-    if (d.report.level === 'risky' && !await uiConfirm('This job failed our background check. Open it anyway?')) { e.preventDefault(); return; }
+  // The link itself opens the employer's page in a new tab; here we only refresh the counts.
+  $('#apply[data-go]')?.addEventListener('click', () => {
     const usedFree = !d.applied && !d.paid && d.free;
     setTimeout(async () => {
       await loadMe();
