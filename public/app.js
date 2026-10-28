@@ -116,7 +116,10 @@ async function loadJobs(filters, first = false) {
   const sel = $('#category');
   if (!sel) return;   // user navigated away
   if (first) { sel.innerHTML += data.categories.map(c => `<option>${esc(c)}</option>`).join(''); sel.value = filters.category; }
-  $('#status').innerHTML = `<span><i class="dot" aria-hidden="true"></i><b>${data.jobs.length} verified job${data.jobs.length === 1 ? '' : 's'}</b> from <b>${data.companies} compan${data.companies === 1 ? 'y' : 'ies'}</b></span>
+  // Only green (score 70+) jobs are called verified; the rest passed the scam checks but need a closer look
+  const verified = data.jobs.filter(j => j.trust_level === 'verified').length;
+  $('#status').innerHTML = `<span><i class="dot" aria-hidden="true"></i><b>${data.jobs.length} checked job${data.jobs.length === 1 ? '' : 's'}</b> from <b>${data.companies} compan${data.companies === 1 ? 'y' : 'ies'}</b></span>
+    <span><b>${verified}</b> verified · <b>${data.jobs.length - verified}</b> to check carefully</span>
     <span>${data.last_refresh ? `Last refreshed ${esc(ago(data.last_refresh))}` : 'Refreshed every 6 hours'} · risky jobs are hidden</span>`;
   $('#count').textContent = `${data.jobs.length} shown`;
   $('#jobList').innerHTML = data.jobs.length ? data.jobs.map(j => `
