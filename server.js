@@ -15,8 +15,9 @@ const payments = require('./lib/payments');
 const { runImport } = require('./lib/importer');
 const { BOARDS, parseCareersUrl } = require('./lib/sources');
 
-// Sample (fictional) data only for local development; production starts empty and imports real jobs.
-if (process.env.NODE_ENV !== 'production' || process.env.SEED_SAMPLE === 'true') seed();
+// The site only lists real jobs imported from job websites. Fictional sample data loads only when
+// SEED_SAMPLE=true is set explicitly, for automated testing on a throwaway database.
+if (process.env.SEED_SAMPLE === 'true') seed();
 const app = express();
 app.use(express.json({ limit: '200kb' }));
 app.use(session({

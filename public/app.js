@@ -142,10 +142,11 @@ async function loadJobs(filters, first = false) {
 // ---------- company report (used in the drawer, the company page and the job page) ----------
 function reportHtml(c, r, unlocked) {
   const year = new Date().getFullYear(), s = r.stats || {};
+  const unknown = c.feed ? 'Not in the listing' : 'Not public';   // c.feed: company known only from job-board listings
   const facts = `<dl class="facts">
-    <div><dt>Founded</dt><dd>${c.founded_year ? `${c.founded_year} (${year - c.founded_year} yrs)` : 'Not public'}</dd></div>
-    <div><dt>Team size</dt><dd>${c.employee_count ? `${c.employee_count} people` : 'Not public'}</dd></div>
-    <div><dt>Website since</dt><dd>${c.domain_created ? fmtDate(c.domain_created) : c.website ? 'Not checked yet' : 'No website'}</dd></div>
+    <div><dt>Founded</dt><dd>${c.founded_year ? `${c.founded_year} (${year - c.founded_year} yrs)` : unknown}</dd></div>
+    <div><dt>Team size</dt><dd>${c.employee_count ? `${c.employee_count} people` : unknown}</dd></div>
+    <div><dt>Website since</dt><dd>${c.domain_created ? fmtDate(c.domain_created) : c.website ? 'Not checked yet' : c.feed ? unknown : 'No website'}</dd></div>
     <div><dt>Hiring system</dt><dd>${c.ats_type ? `${ATS[c.ats_type]} careers page` : 'Job boards'}</dd></div>
     <div><dt>Headquarters</dt><dd>${c.hq_country ? `${c.hq_city ? esc(c.hq_city) + ', ' : ''}${esc(c.hq_country)}` : 'Not public'}</dd></div>
     <div><dt>${/^india$/i.test(c.hq_country || '') || c.cin ? 'Indian registration (CIN)' : 'Registration'}</dt><dd>${c.cin ? esc(c.cin) : /^india$/i.test(c.hq_country || '') ? 'Not on record' : 'Outside India'}</dd></div></dl>`;
