@@ -10,7 +10,7 @@ const bcrypt = require('bcryptjs');
 const db = require('./lib/db');
 const seed = require('./lib/seed');
 const { SEGMENTS, PLAN_DAYS, priceList, classifySegment, planCovers } = require('./lib/pricing');
-const { MIN_SCORE, scoreCompany, refreshDomainAge, domainCreated, hostOf, registrableDomain, textChecks, RED_FLAGS, parseRegistration } = require('./lib/verify');
+const { MIN_SCORE, scoreCompany, listingStatus, missingInfo, refreshDomainAge, domainCreated, hostOf, registrableDomain, textChecks, RED_FLAGS, parseRegistration } = require('./lib/verify');
 const payments = require('./lib/payments');
 const { runImport } = require('./lib/importer');
 const { BOARDS, parseCareersUrl } = require('./lib/sources');
@@ -147,22 +147,24 @@ app.get('/api/jobs', (req, res) => {
     ORDER BY j.posted_at DESC LIMIT 300`)
     .all(q, `%${q}%`, `%${q}%`, `%${q}%`, segment, segment, category, category, hq, hq);
 
-  const companyCache = {};
+  // One company score, shown the same on the list, the job page and the company report
+  const companies = {};
   const blocked = [];
+  let pending = 0;
   const jobs = rows.map(j => {
-    const company = companyCache[j.company_id] ??= db.prepare('SELECT * FROM companies WHERE id=?').get(j.company_id);
-    const { score, level, signals } = scoreCompany(company, j);
-    if (level === 'risky') blocked.push({ title: j.title, company: j.company_name,
-      why: signals.filter(x => x.impact < 0).sort((a, b) => a.impact - b.impact).slice(0, 3).map(x => x.label).join(' · ') });
+    const c = companies[j.company_id] ??= (() => { const company = db.prepare('SELECT * FROM companies WHERE id=?').get(j.company_id); return { company, report: scoreCompany(company) }; })();
+    const ls = listingStatus(c.company, j, c.report);
+    if (ls.status === 'failed') blocked.push({ title: j.title, company: j.company_name, why: notPostedReasons(ls).join(' · ') });
+    if (ls.status === 'pending') pending++;
     const { apply_url, description, ...rest } = j;
-    return { ...rest, snippet: (description || '').slice(0, 180), trust_score: score, trust_level: level, match: matchScore(user, j) };
-  // Jobs under MIN_SCORE (level 'risky') are never posted; only the admin can list them, to review
-  }).filter(j => ((showRisky === '1' && user?.is_admin) || j.trust_score >= MIN_SCORE) && j.trust_score >= (Number(minScore) || 0));
+    return { ...rest, snippet: (description || '').slice(0, 180), trust_score: ls.report.score, trust_level: ls.report.level, listing: ls.status, match: matchScore(user, j) };
+  // Only jobs that pass every check, from companies we have proper details for, are posted. The admin can list all, to review.
+  }).filter(j => ((showRisky === '1' && user?.is_admin) || j.listing === 'listed') && j.trust_score >= (Number(minScore) || 0));
 
   // Category menu: only categories that have jobs people can see (remembered from the last unfiltered list)
   if (!q && !segment && !category && !hq) visibleCategories = [...new Set(jobs.map(j => j.category).filter(Boolean))].sort();
   const categories = visibleCategories ?? db.prepare(`SELECT DISTINCT category FROM jobs WHERE status='open' AND category IS NOT NULL ORDER BY category`).all().map(r => r.category);
-  res.json({ jobs: jobs.slice(0, 100), categories, min_score: MIN_SCORE, hidden_risky: blocked.length, blocked: blocked.slice(0, 10),
+  res.json({ jobs: jobs.slice(0, 100), categories, min_score: MIN_SCORE, hidden_risky: blocked.length, blocked: blocked.slice(0, 10), pending,
     companies: new Set(jobs.map(j => j.company_id)).size,
     last_refresh: db.prepare('SELECT MAX(last_run) t FROM source_status WHERE error IS NULL').get().t });
 });
@@ -173,8 +175,9 @@ app.get('/api/jobs/:id', ah(async (req, res) => {
   if (!job) return res.status(404).json({ error: 'Job not found' });
   let company = db.prepare('SELECT * FROM companies WHERE id=?').get(job.company_id);
   company = await refreshDomainAge(company);
-  const report = scoreCompany(company, job);
-  if (report.score < MIN_SCORE) return res.status(410).json({ code: 'REMOVED', ...removedReason(job, report) });
+  const ls = listingStatus(company, job);
+  if (ls.status !== 'listed') return res.status(410).json(notPosted(job, company, ls));
+  const { report, jobCheck } = ls;
   const applied = Boolean(user && hasApplied(user.id, job.id));
   const paid = Boolean(user && (user.is_admin || hasAccess(user.id, job.segment)));
   // Free-trial users see the full background check on any job they can still apply to for free
@@ -186,6 +189,7 @@ app.get('/api/jobs/:id', ah(async (req, res) => {
     company,
     report: unlocked ? report : { score: report.score, level: report.level, locked: true,
       signals: report.signals.slice(0, 2), hidden_signals: Math.max(0, report.signals.length - 2), stats: { posted90: report.stats.posted90 } },
+    job_check: jobCheck,
     unlocked, paid, free,
     segment: SEGMENTS[job.segment],
     applied,
@@ -193,11 +197,20 @@ app.get('/api/jobs/:id', ah(async (req, res) => {
   });
 }));
 
-// Jobs scoring under MIN_SCORE are not posted: no listing, no job page, no apply link.
-function removedReason(job, report) {
-  const why = report.signals.filter(s => s.impact < 0).sort((a, b) => a.impact - b.impact).slice(0, 3).map(s => s.label);
-  return { error: `"${job.title}" was removed. It scored ${report.score}/100 in our background check; we only post jobs scoring ${MIN_SCORE} or more.`
-    + (why.length ? ` Reasons: ${why.join('; ')}.` : ''), score: report.score, reasons: why };
+// Jobs that aren't posted get no listing, no job page and no apply link. These explain why.
+function notPostedReasons({ report, jobCheck }) {
+  const companyIssues = report.score < MIN_SCORE
+    ? report.signals.filter(s => s.impact < 0).sort((a, b) => a.impact - b.impact).slice(0, 3).map(s => s.label) : [];
+  return [...jobCheck.problems.filter(p => p.level === 'bad').map(p => p.label), ...companyIssues].slice(0, 4);
+}
+function notPosted(job, company, ls) {
+  if (ls.status === 'pending') return { code: 'PENDING',
+    error: `"${job.title}" isn't posted yet. We don't have ${company.name}'s ${ls.missing.join(' or ')}, so we can't run a full background check. We only post jobs from companies we have proper details for.` };
+  const why = notPostedReasons(ls);
+  return { code: 'REMOVED', score: ls.report.score, reasons: why,
+    error: `"${job.title}" was removed because it failed our background check`
+      + (ls.report.score < MIN_SCORE ? ` (the company scored ${ls.report.score}/100; we only post companies scoring ${MIN_SCORE} or more)` : '')
+      + `.${why.length ? ` Reasons: ${why.join('; ')}.` : ''}` };
 }
 
 // Applying happens on the ORIGINAL site (LinkedIn, Greenhouse, company careers…). We check, track and redirect.
@@ -205,8 +218,9 @@ function removedReason(job, report) {
 function tryApply(user, jobId) {
   const job = db.prepare('SELECT * FROM jobs WHERE id=?').get(jobId);
   if (!job) return { status: 404, error: 'Job not found' };
-  const report = scoreCompany(db.prepare('SELECT * FROM companies WHERE id=?').get(job.company_id), job);
-  if (report.score < MIN_SCORE) return { status: 410, code: 'REMOVED', ...removedReason(job, report) };
+  const company = db.prepare('SELECT * FROM companies WHERE id=?').get(job.company_id);
+  const ls = listingStatus(company, job);
+  if (ls.status !== 'listed') return { status: 410, ...notPosted(job, company, ls) };
   if (!user.resume_path && !user.is_admin) return { status: 400, code: 'NO_RESUME', error: 'Upload your resume in your profile before applying' };
   const paid = user.is_admin || hasAccess(user.id, job.segment);
   const again = hasApplied(user.id, job.id);   // opening a job you already applied to never costs anything
@@ -244,11 +258,14 @@ app.get('/api/companies/:id', ah(async (req, res) => {
   company = await refreshDomainAge(company);
   const unlocked = Boolean(user && (user.is_admin || activePlans(user.id).length || trialInfo(user.id).left > 0));
   const report = scoreCompany(company);
-  // Open jobs scoring under the minimum are listed as removed, without a link
+  // Open jobs that aren't posted are shown as removed (failed checks) or waiting (missing company details), without a link
   const jobs = db.prepare(`SELECT * FROM jobs WHERE company_id=? ORDER BY posted_at DESC LIMIT 50`).all(company.id)
-    .map(j => ({ id: j.id, title: j.title, segment: j.segment, status: j.status, posted_at: j.posted_at, closed_at: j.closed_at,
-      removed: j.status === 'open' && scoreCompany(company, j).score < MIN_SCORE }));
-  res.json({ company, report: unlocked ? report : { score: report.score, level: report.level, locked: true, signals: report.signals.slice(0, 2), stats: {} }, jobs, unlocked });
+    .map(j => {
+      const st = j.status === 'open' ? listingStatus(company, j, report).status : null;
+      return { id: j.id, title: j.title, segment: j.segment, status: j.status, posted_at: j.posted_at, closed_at: j.closed_at,
+        removed: st === 'failed', pending: st === 'pending' };
+    });
+  res.json({ company, missing: missingInfo(company), report: unlocked ? report : { score: report.score, level: report.level, locked: true, signals: report.signals.slice(0, 2), hidden_signals: Math.max(0, report.signals.length - 2), stats: {} }, jobs, unlocked });
 }));
 
 app.post('/api/companies/:id/report', auth, (req, res) => {
@@ -380,6 +397,14 @@ app.post('/api/admin/check-requests/:id/done', admin, (req, res) => {
 
 app.get('/api/admin/companies', admin, (req, res) => res.json(db.prepare('SELECT id, name FROM companies ORDER BY name').all()));
 
+// Companies with open jobs that aren't posted because we don't have their founding year or website
+app.get('/api/admin/missing-details', admin, (req, res) => {
+  res.json(db.prepare(`SELECT c.id, c.name, c.founded_year, c.website, c.info_checked_at, COUNT(j.id) open_jobs
+      FROM companies c JOIN jobs j ON j.company_id = c.id AND j.status = 'open'
+      WHERE c.founded_year IS NULL OR c.website IS NULL GROUP BY c.id ORDER BY open_jobs DESC LIMIT 100`).all()
+    .map(c => ({ ...c, missing: missingInfo(c) })));
+});
+
 app.post('/api/admin/companies', admin, ah(async (req, res) => {
   const b = req.body || {};
   if (!b.name) return res.status(400).json({ error: 'Name required' });
@@ -387,10 +412,13 @@ app.post('/api/admin/companies', admin, ah(async (req, res) => {
   if (b.careers_url && !careers) return res.status(400).json({ error: 'Careers link must be a Greenhouse, Lever or Ashby job board, e.g. https://jobs.lever.co/company' });
   const reg = parseRegistration(b.cin);
   if (reg && !reg.valid) return res.status(400).json({ error: 'That isn\'t a valid CIN (e.g. U72900KA2013PTC123456) or LLPIN (e.g. AAB-1234). Copy it from mca.gov.in.' });
-  db.prepare(`INSERT INTO companies (name, website, linkedin_url, founded_year, employee_count, hq_country, hq_city, cin, description, verified_by_admin, ats_type, ats_board)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(name) DO UPDATE SET website=excluded.website, linkedin_url=excluded.linkedin_url,
-    founded_year=excluded.founded_year, employee_count=excluded.employee_count, hq_country=excluded.hq_country, hq_city=excluded.hq_city,
-    cin=excluded.cin, description=excluded.description, verified_by_admin=excluded.verified_by_admin,
+  // A blank box keeps what's already saved (e.g. details found on Wikidata) instead of wiping it
+  db.prepare(`INSERT INTO companies (name, website, linkedin_url, founded_year, employee_count, hq_country, hq_city, cin, description, verified_by_admin, ats_type, ats_board, info_source)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'admin') ON CONFLICT(name) DO UPDATE SET website=COALESCE(excluded.website, companies.website),
+    linkedin_url=COALESCE(excluded.linkedin_url, companies.linkedin_url), founded_year=COALESCE(excluded.founded_year, companies.founded_year),
+    employee_count=COALESCE(excluded.employee_count, companies.employee_count), hq_country=COALESCE(excluded.hq_country, companies.hq_country),
+    hq_city=COALESCE(excluded.hq_city, companies.hq_city), cin=COALESCE(excluded.cin, companies.cin),
+    description=COALESCE(excluded.description, companies.description), verified_by_admin=excluded.verified_by_admin, info_source='admin',
     ats_type=COALESCE(excluded.ats_type, companies.ats_type), ats_board=COALESCE(excluded.ats_board, companies.ats_board)`)
     .run(b.name.trim(), b.website || null, b.linkedin_url || null, Number(b.founded_year) || null, Number(b.employee_count) || null,
       b.hq_country || null, b.hq_city || null, reg?.id || null, b.description || null, b.verified_by_admin ? 1 : 0, careers?.type || null, careers?.board || null);

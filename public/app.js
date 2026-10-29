@@ -120,7 +120,8 @@ async function loadJobs(filters, first = false) {
   const verified = data.jobs.filter(j => j.trust_level === 'verified').length;
   $('#status').innerHTML = `<span><i class="dot" aria-hidden="true"></i><b>${data.jobs.length} checked job${data.jobs.length === 1 ? '' : 's'}</b> from <b>${data.companies} compan${data.companies === 1 ? 'y' : 'ies'}</b></span>
     <span><b>${verified}</b> verified · <b>${data.jobs.length - verified}</b> to check carefully</span>
-    <span>${data.last_refresh ? `Last refreshed ${esc(ago(data.last_refresh))}` : 'Refreshed every 6 hours'} · jobs scoring under ${data.min_score ?? 50} are not posted</span>`;
+    <span>${data.last_refresh ? `Last refreshed ${esc(ago(data.last_refresh))}` : 'Refreshed every 6 hours'} · jobs scoring under ${data.min_score ?? 50} are not posted</span>
+    ${data.pending ? `<span>${data.pending} more job${data.pending === 1 ? '' : 's'} not posted yet: we don't have proper details about ${data.pending === 1 ? 'that company' : 'those companies'}</span>` : ''}`;
   $('#count').textContent = `${data.jobs.length} shown`;
   $('#jobList').innerHTML = data.jobs.length ? data.jobs.map(j => `
     <article class="job">
@@ -138,7 +139,7 @@ async function loadJobs(filters, first = false) {
     : `<div class="empty"><b>No verified jobs match that search</b>Try another skill, company or plan.</div>`;
   const b = $('#blocked');
   b.hidden = !data.blocked.length;
-  $('#blockedTitle').textContent = `${data.hidden_risky} job${data.hidden_risky === 1 ? '' : 's'} not posted: scored under ${data.min_score ?? 50} in our checks`;
+  $('#blockedTitle').textContent = `${data.hidden_risky} job${data.hidden_risky === 1 ? '' : 's'} not posted: they failed our checks`;
   $('#blockedList').innerHTML = data.blocked.map(x => `<li><b>${esc(x.title)}</b> at ${esc(x.company)} · ${esc(x.why)}</li>`).join('');
 }
 
@@ -149,10 +150,13 @@ function reportHtml(c, r, unlocked) {
   const facts = `<dl class="facts">
     <div><dt>Founded</dt><dd>${c.founded_year ? `${c.founded_year} (${year - c.founded_year} yrs)` : unknown}</dd></div>
     <div><dt>Team size</dt><dd>${c.employee_count ? `${c.employee_count} people` : unknown}</dd></div>
-    <div><dt>Website since</dt><dd>${c.domain_created ? fmtDate(c.domain_created) : c.website ? 'Not checked yet' : c.feed ? unknown : 'No website'}</dd></div>
+    ${c.domain_created ? `<div><dt>Website since</dt><dd>${fmtDate(c.domain_created)}</dd></div>`
+      : c.website ? `<div><dt>Website</dt><dd><a href="${esc(c.website)}" target="_blank" rel="noopener">${esc(domainOf(c.website))}</a></dd></div>`
+      : `<div><dt>Website</dt><dd>${c.feed ? unknown : 'No website'}</dd></div>`}
     <div><dt>Hiring system</dt><dd>${c.ats_type ? `${ATS[c.ats_type]} careers page` : 'Job boards'}</dd></div>
     <div><dt>Headquarters</dt><dd>${c.hq_country ? `${c.hq_city ? esc(c.hq_city) + ', ' : ''}${esc(c.hq_country)}` : 'Not public'}</dd></div>
-    <div><dt>${/^india$/i.test(c.hq_country || '') || c.cin ? 'Indian registration (CIN)' : 'Registration'}</dt><dd>${c.cin ? esc(c.cin) : /^india$/i.test(c.hq_country || '') ? 'Not on record' : 'Outside India'}</dd></div></dl>`;
+    <div><dt>${/^india$/i.test(c.hq_country || '') || c.cin ? 'Indian registration (CIN)' : 'Registration'}</dt><dd>${c.cin ? esc(c.cin) : /^india$/i.test(c.hq_country || '') ? 'Not on record' : 'Outside India'}</dd></div></dl>
+    ${c.info_source ? `<p class="hint">Company details from ${c.info_source === 'wikidata' ? `<a href="https://www.wikidata.org/wiki/${esc(c.wikidata_id)}" target="_blank" rel="noopener">Wikidata</a>, the public database behind Wikipedia` : 'our team'}.</p>` : ''}`;
   const checks = `<ul class="checks">${r.signals.map(x => `<li>${stIcon(x.impact > 0 ? 'ok' : x.impact <= -8 ? 'bad' : x.impact < 0 ? 'warn' : 'n')}
     <span>${esc(x.label)}</span><span class="val">${x.impact > 0 ? '+' : ''}${x.impact}</span>${x.detail ? `<span class="det">${esc(x.detail)}</span>` : ''}</li>`).join('')}</ul>`;
   if (!unlocked) return `<div class="report-grid">${facts}<div><p class="sub">Checks</p>${checks}</div>
@@ -182,7 +186,7 @@ async function openCompany(id) {
   $('#drHead').innerHTML = `${seal(d.report.score, d.report.level, 56)}<div style="min-width:0"><h2 id="drTitle">${esc(c.name)}</h2>
     <p class="mono">${esc(domainOf(c.website) || 'no website')}${c.hq_country ? ' · ' + esc(c.hq_country) : ''}</p></div>
     <button type="button" class="btn ghost sm x" id="drClose" aria-label="Close report">✕</button>`;
-  const open = d.jobs.filter(j => j.status === 'open' && !j.removed);
+  const open = d.jobs.filter(j => j.status === 'open' && !j.removed && !j.pending);
   $('#drBody').innerHTML = `${c.description ? `<p>${esc(c.description)}</p>` : ''}${reportHtml(c, d.report, d.unlocked)}
     <div><p class="sub">Open jobs here (${open.length})</p>${open.map(j => `<div style="display:flex;justify-content:space-between;gap:10px;padding:10px 0;border-top:1px solid var(--line);font-size:14px">
       <a href="#/job/${j.id}">${esc(j.title)}</a><span class="hint">${esc(SEG[j.segment])}</span></div>`).join('') || '<p class="hint">None open right now.</p>'}</div>
@@ -208,10 +212,12 @@ async function companyPage(id) {
   const d = await api('/api/companies/' + id), c = d.company;
   $app.innerHTML = `<div class="sec-head"><div style="display:flex;gap:16px;align-items:center">${seal(d.report.score, d.report.level, 64)}
       <div><h1>${esc(c.name)}</h1><p>${esc(c.description || domainOf(c.website) || '')}</p></div></div>${pill(d.report.level)}</div>
+    ${d.missing?.length ? `<div class="notice">We don't have ${esc(c.name)}'s ${esc(d.missing.join(' or '))} yet, so its jobs aren't posted on Parakh. We only post jobs from companies we have proper details for.</div>` : ''}
     <div class="grid2"><div class="card"><h2>Background check</h2>${reportHtml(c, d.report, d.unlocked)}</div>
       <div class="card"><h2>Job history</h2><div class="scroll"><table class="admin"><thead><tr><th scope="col">Role</th><th scope="col">Posted</th><th scope="col">Status</th></tr></thead><tbody>
-        ${d.jobs.map(j => `<tr><td>${j.status === 'open' && !j.removed ? `<a href="#/job/${j.id}">${esc(j.title)}</a>` : esc(j.title)}</td><td class="mono">${fmtDate(j.posted_at)}</td>
-          <td>${j.removed ? '<span class="pill bad">removed: failed checks</span>' : `<span class="pill ${j.status === 'open' ? 'ok' : 'n'}">${j.status}</span>`}</td></tr>`).join('')}</tbody></table></div></div></div>`;
+        ${d.jobs.map(j => `<tr><td>${j.status === 'open' && !j.removed && !j.pending ? `<a href="#/job/${j.id}">${esc(j.title)}</a>` : esc(j.title)}</td><td class="mono">${fmtDate(j.posted_at)}</td>
+          <td>${j.removed ? '<span class="pill bad">removed: failed checks</span>' : j.pending ? '<span class="pill warn">not posted: company details missing</span>'
+            : `<span class="pill ${j.status === 'open' ? 'ok' : 'n'}">${j.status}</span>`}</td></tr>`).join('')}</tbody></table></div></div></div>`;
 }
 
 // ---------- job page ----------
@@ -247,6 +253,8 @@ async function jobPage(id) {
     <div class="grid2">
       <div class="stack">
         <div class="card"><h2>About the job</h2><div class="desc">${esc(j.description || 'See the original posting for details.')}</div></div>
+        <div class="card"><h2>Checks on this job post</h2><p class="hint" style="margin-bottom:8px">Pass or fail. A post that fails isn't shown on Parakh. The score above is the company's.</p>
+          <ul class="checks">${[...d.job_check.passed.map(c => ({ ...c, level: 'ok' })), ...d.job_check.problems].map(c => `<li>${stIcon(c.level)}<span>${esc(c.label)}</span><span></span>${c.detail ? `<span class="det">${esc(c.detail)}</span>` : ''}</li>`).join('')}</ul></div>
         ${state.user ? `<div class="card"><h2>Applied here before? Tell others</h2><p class="hint" style="margin-bottom:12px">Your answer changes this company's score.</p>
           <div class="acts">${[['hired', 'I got hired'], ['interview', 'Got an interview'], ['no_response', 'No response'], ['scam', 'Report a scam']]
             .map(([k, t]) => `<button type="button" class="btn sm" data-report="${k}">${t}</button>`).join('')}</div>
@@ -513,7 +521,8 @@ async function profilePage() {
 // ---------- admin ----------
 async function adminPage() {
   if (!state.user?.is_admin) { $app.innerHTML = '<div class="card"><h1 style="font-size:24px">Admins only</h1><p class="hint">Set ADMIN_EMAIL on the server and sign up with that email.</p></div>'; return; }
-  const [stats, companies, src, reqs] = await Promise.all([api('/api/admin/stats'), api('/api/admin/companies'), api('/api/admin/sources'), api('/api/admin/check-requests')]);
+  const [stats, companies, src, reqs, missing] = await Promise.all([api('/api/admin/stats'), api('/api/admin/companies'), api('/api/admin/sources'),
+    api('/api/admin/check-requests'), api('/api/admin/missing-details')]);
   $app.innerHTML = `
     <div class="sec-head"><div><h1>Admin</h1><p>Job sources, company check requests, and adding companies and jobs by hand.</p></div></div>
     <div class="card" style="margin-bottom:24px"><div class="stats">${Object.entries(stats).map(([k, v]) =>
@@ -528,6 +537,12 @@ async function adminPage() {
       </tbody></table></div>
       <p class="note">LinkedIn, Indeed, Naukri and Glassdoor don't offer a public jobs feed and don't allow copying their listings. Add their jobs below, using the original link as the apply URL.</p>
     </div>
+    <div class="card" style="margin-bottom:24px"><h2>Companies missing details</h2>
+      <p class="hint" style="margin-bottom:8px">Their jobs aren't posted until we know the founding year and website. We look these up on Wikidata after every import; fill in the rest by hand.</p>
+      ${missing.length ? `<div class="scroll"><table class="admin"><thead><tr><th scope="col">Company</th><th scope="col">Open jobs</th><th scope="col">Missing</th><th scope="col"><span class="sr-only">Action</span></th></tr></thead><tbody>
+      ${missing.map(m => `<tr><td>${esc(m.name)}</td><td class="mono">${m.open_jobs}</td><td>${esc(m.missing.join(', '))}</td>
+        <td><button type="button" class="btn sm" data-fill="${esc(m.name)}">Fill in</button></td></tr>`).join('')}</tbody></table></div>`
+      : '<p class="hint">None. Every company with open jobs has proper details.</p>'}</div>
     <div class="card" style="margin-bottom:24px"><h2>Companies people asked us to check</h2>${reqs.length ? `<div class="scroll"><table class="admin"><thead><tr>
         <th scope="col">Company</th><th scope="col">Website</th><th scope="col">Asked by</th><th scope="col">Status</th><th scope="col"><span class="sr-only">Action</span></th></tr></thead><tbody>
       ${reqs.map(r => `<tr><td>${esc(r.company)}${r.asks > 1 ? ` <span class="pill warn">${r.asks} asks</span>` : ''}</td><td>${esc(r.website || '–')}</td>
@@ -565,6 +580,9 @@ async function adminPage() {
         <div class="field full"><button class="btn primary">Add job</button></div></div></form>
     </div>`;
 
+  document.querySelectorAll('[data-fill]').forEach(b => b.addEventListener('click', () => {
+    $('#cName').value = b.dataset.fill; $('#cYear').focus(); $('#cf').scrollIntoView({ block: 'start' });
+  }));
   $('#imp').addEventListener('click', async e => {
     const b = e.currentTarget; b.disabled = true; b.textContent = 'Importing…';
     try {

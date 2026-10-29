@@ -26,6 +26,13 @@ Sign up with the `ADMIN_EMAIL` address to get the **Admin** page. There you can 
 
 The score runs from 0 to 100: **Verified** is 70 or more, **Check carefully** is 50–69. **Jobs scoring under 50 are not posted at all**: they're left out of the job list, their job page only says why they were removed, and their Apply link is refused. Company pages mark them "removed: failed checks". Change the minimum with `MIN_SCORE` (for example `MIN_SCORE=60`).
 
+## Only companies with proper information
+- A job is posted only if its company has a known **founding year and website**, its post passes every check, and the company scores 50 or more.
+- **One score per company**, shown the same on the job list, the job page and the company report. Checks on one job post (scam wording, where the Apply link goes) are pass/fail: a post that fails isn't shown, but it doesn't change the company's number.
+- Job listings don't include company details, so after every import the importer looks companies up on **Wikidata** (`lib/enrich.js`), the free public database behind Wikipedia. A match is accepted only if the name matches exactly, the entry describes a company, and it has both a founding date and an official website. Found details are labelled "Company details from Wikidata". They never overwrite details you entered.
+- Companies Wikidata doesn't have show under **Admin → Companies missing details**. Click **Fill in**, add the founding year and website, and their jobs are posted on the next page load.
+- Jobs from companies without details aren't shown. The jobs page counts them ("N more jobs not posted yet"), and their job page explains why.
+
 ## Indian companies
 - The jobs page has an **Indian companies** filter (companies whose HQ country is India).
 - Every real Indian company is registered with the Ministry of Corporate Affairs and has a **CIN** (or an **LLPIN** for an LLP). Add it on Admin → Add company (copy it from mca.gov.in). The background check reads it: listed or unlisted, state, year of incorporation, company type. A valid CIN raises the score. A malformed one is a strong scam sign. An Indian company with no CIN on record loses a few points.

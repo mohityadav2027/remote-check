@@ -188,3 +188,54 @@ test('Indian company registration numbers (CIN / LLPIN) are read and checked', (
     assert.equal(parseRegistration(bad).valid, false, bad);
   assert.equal(parseRegistration(''), null);
 });
+
+test('company details from Wikidata are accepted only for a clear company match', () => {
+  const { detailsFromEntity, norm } = require('../lib/enrich');
+  const entity = {
+    id: 'Q123', labels: { en: { value: 'Helpwise Inc.' } }, descriptions: { en: { value: 'American software company' } },
+    claims: {
+      P571: [{ mainsnak: { datavalue: { value: { time: '+2014-03-01T00:00:00Z' } } } }],
+      P856: [{ mainsnak: { datavalue: { value: 'https://helpwise.example' } } }],
+      P1128: [
+        { mainsnak: { datavalue: { value: { amount: '+120' } } }, qualifiers: { P585: [{ datavalue: { value: { time: '+2020-01-01T00:00:00Z' } } }] } },
+        { mainsnak: { datavalue: { value: { amount: '+350' } } }, qualifiers: { P585: [{ datavalue: { value: { time: '+2024-01-01T00:00:00Z' } } }] } },
+      ],
+      P4264: [{ mainsnak: { datavalue: { value: 'helpwise' } } }],
+      P17: [{ mainsnak: { datavalue: { value: { id: 'Q30' } } } }],
+    },
+  };
+  const d = detailsFromEntity(entity, 'Helpwise');
+  assert.deepEqual([d.founded_year, d.website, d.employee_count, d.linkedin_url, d.hq_country, d.wikidata_id],
+    [2014, 'https://helpwise.example', 350, 'https://www.linkedin.com/company/helpwise', 'USA', 'Q123']);
+  assert.equal(norm('Acme Pvt. Ltd.'), 'acme');
+  assert.equal(detailsFromEntity(entity, 'Helpwise Labs'), null, 'different name accepted');
+  assert.equal(detailsFromEntity({ ...entity, descriptions: { en: { value: 'American footballer' } } }, 'Helpwise'), null, 'a person accepted');
+  assert.equal(detailsFromEntity({ ...entity, descriptions: { en: { value: '2014 film' } } }, 'Helpwise'), null, 'a film accepted');
+  assert.equal(detailsFromEntity({ ...entity, claims: { ...entity.claims, P856: [] } }, 'Helpwise'), null, 'no website accepted');
+  assert.equal(detailsFromEntity({ ...entity, claims: { ...entity.claims, P571: [] } }, 'Helpwise'), null, 'no founding date accepted');
+});
+
+test('only jobs that pass every check, from companies with proper details, are posted', () => {
+  const { checkJob, missingInfo, listingStatus } = require('../lib/verify');
+  const good = { title: 'Support Agent', description: 'Help customers by email.', apply_url: 'https://jobs.lever.co/acme/1' };
+  const scam = { title: 'Data entry', description: 'Pay a registration fee and message us on WhatsApp', apply_url: 'https://jobs.lever.co/acme/2' };
+  const offsite = { title: 'Support Agent', description: 'Help customers.', apply_url: 'https://acme-jobs-apply.example/form' };
+  const company = { id: 999999, name: 'Acme', founded_year: 2010, website: 'https://acme.example', linkedin_url: 'x', employee_count: 200, domain_created: '2009-01-01' };
+  assert.equal(checkJob(company, good).ok, true);
+  assert.equal(checkJob(company, scam).ok, false);
+  assert.equal(checkJob(company, offsite).ok, false);
+  assert.deepEqual(missingInfo({}), ['founding year', 'website']);
+  assert.deepEqual(missingInfo(company), []);
+  assert.equal(listingStatus(company, good).status, 'listed');
+  assert.equal(listingStatus(company, scam).status, 'failed');
+  assert.equal(listingStatus({ ...company, founded_year: null }, good).status, 'pending');
+});
+
+test('brand check flags hiring "for" a big brand, not mentions of its tools', () => {
+  const { textChecks } = require('../lib/verify');
+  const brand = s => textChecks(s, '').some(h => h.label.startsWith('Uses'));
+  assert.equal(brand('Comfortable with Google Workspace and Microsoft Excel. Apply at https://apply.workable.com/x'), false);
+  assert.equal(brand('Experience with AWS. Apply at https://boards.greenhouse.io/x'), false);
+  assert.equal(brand('Work at Google from home! Register at https://google-jobs-now.example'), true);
+  assert.equal(brand('Amazon HR team: contact on Telegram. Mail hr.amazon@gmail.com'), true);
+});
