@@ -40,6 +40,12 @@ function activePlans(userId) {
   return db.prepare(`SELECT * FROM subscriptions WHERE user_id = ? AND status = 'paid' AND expires_at > datetime('now') ORDER BY expires_at DESC`).all(userId);
 }
 const hasAccess = (userId, segment) => activePlans(userId).some(p => planCovers(p.segment, segment));
+// Where a job is posted (job board, careers page, apply site) is shown only with a paid pass. Free-trial
+// applications still open the real posting through /go/:id, they just don't show where it is first.
+const SOURCE_FIELDS = ['source', 'external_id'];
+const hideSource = job => Object.fromEntries(Object.entries(job).filter(([k]) => !SOURCE_FIELDS.includes(k)));
+const hideHiringSystem = ({ ats_type, ats_board, ...company }) => company;
+const GENERIC_APPLY_CHECK = { label: 'Apply link goes to a known job board or the company\'s own site', detail: 'The exact site is shown with a paid pass' };
 
 // Free trial: every new user can apply to their first FREE_APPLIES jobs (any plan level) without paying.
 const FREE_APPLIES = Number(process.env.FREE_APPLIES ?? 2);
@@ -151,13 +157,15 @@ app.get('/api/jobs', (req, res) => {
   const companies = {};
   const blocked = [];
   let pending = 0;
+  const plans = user ? activePlans(user.id) : [];
+  const seesSource = seg => Boolean(user?.is_admin || plans.some(p => planCovers(p.segment, seg)));
   const jobs = rows.map(j => {
     const c = companies[j.company_id] ??= (() => { const company = db.prepare('SELECT * FROM companies WHERE id=?').get(j.company_id); return { company, report: scoreCompany(company) }; })();
     const ls = listingStatus(c.company, j, c.report);
     if (ls.status === 'failed') blocked.push({ title: j.title, company: j.company_name, why: notPostedReasons(ls).join(' · ') });
     if (ls.status === 'pending') pending++;
     const { apply_url, description, ...rest } = j;
-    return { ...rest, snippet: (description || '').slice(0, 180), trust_score: ls.report.score, trust_level: ls.report.level, listing: ls.status, match: matchScore(user, j) };
+    return { ...(seesSource(j.segment) ? rest : hideSource(rest)), snippet: (description || '').slice(0, 180), trust_score: ls.report.score, trust_level: ls.report.level, listing: ls.status, match: matchScore(user, j) };
   // Only jobs that pass every check, from companies we have proper details for, are posted. The admin can list all, to review.
   }).filter(j => ((showRisky === '1' && user?.is_admin) || j.listing === 'listed') && j.trust_score >= (Number(minScore) || 0));
 
@@ -185,11 +193,11 @@ app.get('/api/jobs/:id', ah(async (req, res) => {
   const unlocked = paid || free;
   const { apply_url, ...safeJob } = job;
   res.json({
-    job: { ...safeJob, apply_host: new URL(apply_url).hostname, match: matchScore(user, job) },
-    company,
+    job: paid ? { ...safeJob, apply_host: new URL(apply_url).hostname, match: matchScore(user, job) } : { ...hideSource(safeJob), match: matchScore(user, job) },
+    company: paid ? company : hideHiringSystem(company),
     report: unlocked ? report : { score: report.score, level: report.level, locked: true,
       signals: report.signals.slice(0, 2), hidden_signals: Math.max(0, report.signals.length - 2), stats: { posted90: report.stats.posted90 } },
-    job_check: jobCheck,
+    job_check: paid ? jobCheck : { ...jobCheck, passed: jobCheck.passed.map(p => p.label.startsWith('Apply link goes to') ? GENERIC_APPLY_CHECK : p) },
     unlocked, paid, free,
     segment: SEGMENTS[job.segment],
     applied,
@@ -265,7 +273,8 @@ app.get('/api/companies/:id', ah(async (req, res) => {
       return { id: j.id, title: j.title, segment: j.segment, status: j.status, posted_at: j.posted_at, closed_at: j.closed_at,
         removed: st === 'failed', pending: st === 'pending' };
     });
-  res.json({ company, missing: missingInfo(company), report: unlocked ? report : { score: report.score, level: report.level, locked: true, signals: report.signals.slice(0, 2), hidden_signals: Math.max(0, report.signals.length - 2), stats: {} }, jobs, unlocked });
+  const paid = Boolean(user && (user.is_admin || activePlans(user.id).length));
+  res.json({ company: paid ? company : hideHiringSystem(company), missing: missingInfo(company), report: unlocked ? report : { score: report.score, level: report.level, locked: true, signals: report.signals.slice(0, 2), hidden_signals: Math.max(0, report.signals.length - 2), stats: {} }, jobs, unlocked });
 }));
 
 app.post('/api/companies/:id/report', auth, (req, res) => {
@@ -451,8 +460,10 @@ app.get('/api/admin/sources', admin, (req, res) => {
   res.json({ boards, careers });
 });
 
-// Public list of where jobs come from (shown on the home page)
+// Where jobs come from (shown on the home page to people with a paid pass)
 app.get('/api/sources', (req, res) => {
+  const user = currentUser(req);
+  if (!user || !(user.is_admin || activePlans(user.id).length)) return res.json({ sources: [] });
   const counts = Object.fromEntries(db.prepare(`SELECT source, COUNT(*) n FROM jobs WHERE status='open' GROUP BY source`).all().map(r => [r.source, r.n]));
   const careerJobs = Object.entries(counts).filter(([k]) => k.includes(':')).reduce((s, [, n]) => s + n, 0);
   res.json({

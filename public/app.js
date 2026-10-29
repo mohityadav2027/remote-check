@@ -100,7 +100,7 @@ function jobCard(j, saved) {
     <div class="job-foot">
       <div class="salary-group">${j.salary_min
         ? `<span class="salary-pill">${usd(j.salary_min)} – ${usd(j.salary_max)} <small>/ yr</small></span>${state.fx ? `<span class="hint">≈ ${lakhs(j.salary_min)} – ${lakhs(j.salary_max)} a year</span>` : ''}`
-        : '<span class="salary-pill muted">Pay not listed</span>'}<span class="hint">via ${esc(j.source)}</span></div>
+        : '<span class="salary-pill muted">Pay not listed</span>'}${j.source ? `<span class="hint">via ${esc(j.source)}</span>` : ''}</div>
       <a class="btn primary" href="#/job/${j.id}">View &amp; apply</a>
     </div>
   </article>`;
@@ -175,7 +175,9 @@ async function jobsPage() {
   // Exchange rate for the rupee estimates on each card
   if (!state.fx) state.fx = (await api('/api/pricing').catch(() => ({}))).fx_rate;
   await loadJobs(filters, true);
+  // Where jobs come from is shown only with a paid pass (the server sends an empty list otherwise)
   api('/api/sources').then(({ sources }) => {
+    if (!sources.length) return;
     $('#sources').innerHTML = `Jobs collected from ${sources.map(s => s.site ? `<a href="${esc(s.site)}" target="_blank" rel="noopener">${esc(s.label)}</a>` : esc(s.label)).join(', ')}. You always apply on the original listing.`;
   }).catch(() => {});
 }
@@ -214,7 +216,7 @@ function reportHtml(c, r, unlocked) {
     ${c.domain_created ? `<div><dt>Website since</dt><dd>${fmtDate(c.domain_created)}</dd></div>`
       : c.website ? `<div><dt>Website</dt><dd><a href="${esc(c.website)}" target="_blank" rel="noopener">${esc(domainOf(c.website))}</a></dd></div>`
       : `<div><dt>Website</dt><dd>${c.feed ? unknown : 'No website'}</dd></div>`}
-    <div><dt>Hiring system</dt><dd>${c.ats_type ? `${ATS[c.ats_type]} careers page` : 'Job boards'}</dd></div>
+    ${'ats_type' in c ? `<div><dt>Hiring system</dt><dd>${c.ats_type ? `${ATS[c.ats_type]} careers page` : 'Job boards'}</dd></div>` : ''}
     <div><dt>Headquarters</dt><dd>${c.hq_country ? `${c.hq_city ? esc(c.hq_city) + ', ' : ''}${esc(c.hq_country)}` : 'Not public'}</dd></div>
     <div><dt>${/^india$/i.test(c.hq_country || '') || c.cin ? 'Indian registration (CIN)' : 'Registration'}</dt><dd>${c.cin ? esc(c.cin) : /^india$/i.test(c.hq_country || '') ? 'Not on record' : 'Outside India'}</dd></div></dl>
     ${c.info_source ? `<p class="hint">Company details from ${c.info_source === 'wikidata' ? `<a href="https://www.wikidata.org/wiki/${esc(c.wikidata_id)}" target="_blank" rel="noopener">Wikidata</a>, the public database behind Wikipedia` : 'our team'}.</p>` : ''}`;
@@ -291,7 +293,9 @@ function applyControl(d) {
   if (!state.user) return link(`#/signup?next=${encodeURIComponent(here)}`, `Sign up to apply · first ${d.trial.limit} free`);
   if (!state.user.resume_name && !state.user.is_admin) return link('#/profile', 'Add your resume to apply');
   if (!(d.applied || d.paid || d.free)) return link(`#/pricing?need=${j.segment}`, 'Get a pass to apply');
-  const label = d.applied ? `Applied ✓ · open ${esc(j.apply_host)} again` : d.paid ? `Apply on ${esc(j.apply_host)} ↗` : `Apply free on ${esc(j.apply_host)} ↗`;
+  // The apply site is named only with a paid pass; free-trial applies open the same real posting without naming it
+  const on = j.apply_host ? ` on ${esc(j.apply_host)}` : '';
+  const label = d.applied ? (j.apply_host ? `Applied ✓ · open ${esc(j.apply_host)} again` : 'Applied ✓ · open the job again ↗') : d.paid ? `Apply${on} ↗` : `Apply free${on} ↗`;
   return `<a class="btn primary" id="apply" data-go href="${goHref(j.id)}" target="_blank" rel="noopener">${label}</a>`;
 }
 
@@ -301,15 +305,15 @@ async function jobPage(id) {
     <div class="card" style="margin-bottom:24px">
       <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">${seal(d.report.score, d.report.level, 64)}
         <div style="min-width:0;flex:1"><h1 style="font-size:clamp(24px,3vw,32px)">${esc(j.title)}</h1>
-          <div class="co"><button type="button" class="linkbtn" data-company="${d.company.id}">${esc(d.company.name)}</button><span>${remoteWhere(j.location)}</span><span>Posted ${esc(ago(j.posted_at))} via ${esc(j.source)}</span></div></div>
+          <div class="co"><button type="button" class="linkbtn" data-company="${d.company.id}">${esc(d.company.name)}</button><span>${remoteWhere(j.location)}</span><span>Posted ${esc(ago(j.posted_at))}${j.source ? ` via ${esc(j.source)}` : ''}</span></div></div>
         ${pill(d.report.level)}</div>
       <div class="tags"><span class="tag seg">${esc(d.segment.name)} pass</span>${j.category ? `<span class="tag">${esc(j.category)}</span>` : ''}<span class="tag">${salary(j)}</span>
         ${j.match != null ? `<span class="tag ${j.match >= 50 ? 'ok' : ''}">Skill match ${j.match}%</span>` : ''}</div>
       <div class="acts" style="margin-top:16px;align-items:center">
         ${applyControl(d)}
         <span class="hint">${!d.applied && state.user && d.free
-          ? `This uses free application ${d.trial.used + 1} of ${d.trial.limit}. You apply on the employer's own page (${esc(j.apply_host)}).`
-          : `You apply on the employer's original page (${esc(j.apply_host)}). We never ask you for money.`}</span></div>
+          ? `This uses free application ${d.trial.used + 1} of ${d.trial.limit}. We take you straight to the original job posting.`
+          : `You apply on the employer's original page${j.apply_host ? ` (${esc(j.apply_host)})` : ''}. We never ask you for money.`}</span></div>
     </div>
     <div class="grid2">
       <div class="stack">
