@@ -271,7 +271,7 @@ table.admin th { font-size: 12px; text-transform: uppercase; letter-spacing: .08
 </style>
 </head>
 <body>
-<div class="preview-bar"><b>Live jobs:</b> real remote jobs open to India, loaded from Remotive, Remote OK, Jobicy, Himalayas and other job websites when you open this page. Apply opens the real posting. Sign-up and payments here are a demo.</div>
+<div class="preview-bar"><b>Live jobs:</b> real remote jobs open to India, loaded from public job websites when you open this page. Apply opens the real posting. Sign-up and payments here are a demo.</div>
 
   <a class="skip-link" href="#app">Skip to content</a>
   <header class="bar">
@@ -894,6 +894,11 @@ function scan({ text = '', company = '', website = '', cin = '' }) {
 }
 
 const realFetch = window.fetch.bind(window);
+// Where a job is posted is shown only with a paid pass (free-trial applies still open the real posting)
+const hideSource = ({ source, apply_host, ...job }) => job;
+const hideApplyHost = check => ({ ...check, passed: check.passed.map(p => p.label.startsWith('Apply link goes to')
+  ? { label: 'Apply link goes to a known job board or the company\'s own site', detail: 'The exact site is shown with a paid pass' } : p) });
+const hideBoards = c => c.feed ? { ...c, description: null } : c;
 window.fetch = async (url, opts = {}) => {
   // Only the site's own /api/ calls are answered here; job boards and Wikidata go to the real internet
   if (!String(url).startsWith('/api/')) return realFetch(url, opts);
@@ -905,7 +910,7 @@ window.fetch = async (url, opts = {}) => {
   const live = await READY.then(() => true, () => false);
   if (!live && (p === '/api/jobs' || p.startsWith('/api/jobs/') || p.startsWith('/api/companies/')))
     return err(503, LIVE_ERROR);
-  if (p === '/api/sources') return reply(200, { sources: DATA.sources.filter(s => s.open > 0) });
+  if (p === '/api/sources') return reply(200, { sources: mock.plans.length ? DATA.sources.filter(s => s.open > 0) : [] });
   if (p === '/api/me') return reply(200, { user: mock.user, plans: mock.plans, trial: trial() });
   if (p === '/api/signup' || p === '/api/login') {
     const f = body instanceof FormData ? Object.fromEntries(body) : body;
@@ -948,7 +953,7 @@ window.fetch = async (url, opts = {}) => {
     const q = (u.searchParams.get('q') || '').toLowerCase(), seg = u.searchParams.get('segment'), cat = u.searchParams.get('category'), hq = (u.searchParams.get('hq') || '').toLowerCase();
     const jobs = DATA.list.jobs.filter(j => (!q || `${j.title} ${j.tags} ${j.company_name}`.toLowerCase().includes(q)) && (!seg || j.segment === seg) && (!cat || j.category === cat)
       && (!hq || (j.hq_country || '').toLowerCase() === hq))
-      .map(j => ({ ...j, match: matchOf(j) }));
+      .map(j => ({ ...(covers(j.segment) ? j : hideSource(j)), match: matchOf(j) }));
     return reply(200, { ...DATA.list, jobs, companies: new Set(jobs.map(j => j.company_id)).size });
   }
   if ((x = p.match(/^\/api\/jobs\/(\d+)\/apply$/))) {
@@ -969,14 +974,15 @@ window.fetch = async (url, opts = {}) => {
     const paid = Boolean(mock.user && covers(d.job.segment));
     const free = Boolean(mock.user && !paid && (applied || trial().left > 0));
     const unlocked = paid || free;
-    return reply(200, { job: { ...d.job, match: matchOf(d.job) }, company: d.company, segment: d.segment, unlocked, paid, free, job_check: d.job_check,
+    return reply(200, { job: { ...(paid ? d.job : hideSource(d.job)), match: matchOf(d.job) }, company: paid ? d.company : hideBoards(d.company), segment: d.segment,
+      unlocked, paid, free, job_check: paid ? d.job_check : hideApplyHost(d.job_check),
       report: unlocked ? d.unlocked : d.locked, applied, trial: trial() });
   }
   if ((x = p.match(/^\/api\/companies\/(\d+)\/report$/))) return reply(200, { ok: true });
   if ((x = p.match(/^\/api\/companies\/(\d+)$/))) {
     const d = DATA.company[x[1]]; if (!d) return err(404, 'Company not found');
     const unlocked = Boolean(mock.user && (mock.plans.length || trial().left > 0));
-    return reply(200, { company: d.company, missing: d.missing, jobs: d.jobs, unlocked, report: unlocked ? d.unlocked : d.locked });
+    return reply(200, { company: mock.plans.length ? d.company : hideBoards(d.company), missing: d.missing, jobs: d.jobs, unlocked, report: unlocked ? d.unlocked : d.locked });
   }
   return err(404, 'Not available in the preview');
 };
@@ -1114,7 +1120,7 @@ function jobCard(j, saved) {
     <div class="job-foot">
       <div class="salary-group">${j.salary_min
         ? `<span class="salary-pill">${usd(j.salary_min)} – ${usd(j.salary_max)} <small>/ yr</small></span>${state.fx ? `<span class="hint">≈ ${lakhs(j.salary_min)} – ${lakhs(j.salary_max)} a year</span>` : ''}`
-        : '<span class="salary-pill muted">Pay not listed</span>'}<span class="hint">via ${esc(j.source)}</span></div>
+        : '<span class="salary-pill muted">Pay not listed</span>'}${j.source ? `<span class="hint">via ${esc(j.source)}</span>` : ''}</div>
       <a class="btn primary" href="#/job/${j.id}">View &amp; apply</a>
     </div>
   </article>`;
@@ -1189,7 +1195,9 @@ async function jobsPage() {
   // Exchange rate for the rupee estimates on each card
   if (!state.fx) state.fx = (await api('/api/pricing').catch(() => ({}))).fx_rate;
   await loadJobs(filters, true);
+  // Where jobs come from is shown only with a paid pass (the server sends an empty list otherwise)
   api('/api/sources').then(({ sources }) => {
+    if (!sources.length) return;
     $('#sources').innerHTML = `Jobs collected from ${sources.map(s => s.site ? `<a href="${esc(s.site)}" target="_blank" rel="noopener">${esc(s.label)}</a>` : esc(s.label)).join(', ')}. You always apply on the original listing.`;
   }).catch(() => {});
 }
@@ -1228,7 +1236,7 @@ function reportHtml(c, r, unlocked) {
     ${c.domain_created ? `<div><dt>Website since</dt><dd>${fmtDate(c.domain_created)}</dd></div>`
       : c.website ? `<div><dt>Website</dt><dd><a href="${esc(c.website)}" target="_blank" rel="noopener">${esc(domainOf(c.website))}</a></dd></div>`
       : `<div><dt>Website</dt><dd>${c.feed ? unknown : 'No website'}</dd></div>`}
-    <div><dt>Hiring system</dt><dd>${c.ats_type ? `${ATS[c.ats_type]} careers page` : 'Job boards'}</dd></div>
+    ${'ats_type' in c ? `<div><dt>Hiring system</dt><dd>${c.ats_type ? `${ATS[c.ats_type]} careers page` : 'Job boards'}</dd></div>` : ''}
     <div><dt>Headquarters</dt><dd>${c.hq_country ? `${c.hq_city ? esc(c.hq_city) + ', ' : ''}${esc(c.hq_country)}` : 'Not public'}</dd></div>
     <div><dt>${/^india$/i.test(c.hq_country || '') || c.cin ? 'Indian registration (CIN)' : 'Registration'}</dt><dd>${c.cin ? esc(c.cin) : /^india$/i.test(c.hq_country || '') ? 'Not on record' : 'Outside India'}</dd></div></dl>
     ${c.info_source ? `<p class="hint">Company details from ${c.info_source === 'wikidata' ? `<a href="https://www.wikidata.org/wiki/${esc(c.wikidata_id)}" target="_blank" rel="noopener">Wikidata</a>, the public database behind Wikipedia` : 'our team'}.</p>` : ''}`;
@@ -1305,7 +1313,9 @@ function applyControl(d) {
   if (!state.user) return link(`#/signup?next=${encodeURIComponent(here)}`, `Sign up to apply · first ${d.trial.limit} free`);
   if (!state.user.resume_name && !state.user.is_admin) return link('#/profile', 'Add your resume to apply');
   if (!(d.applied || d.paid || d.free)) return link(`#/pricing?need=${j.segment}`, 'Get a pass to apply');
-  const label = d.applied ? `Applied ✓ · open ${esc(j.apply_host)} again` : d.paid ? `Apply on ${esc(j.apply_host)} ↗` : `Apply free on ${esc(j.apply_host)} ↗`;
+  // The apply site is named only with a paid pass; free-trial applies open the same real posting without naming it
+  const on = j.apply_host ? ` on ${esc(j.apply_host)}` : '';
+  const label = d.applied ? (j.apply_host ? `Applied ✓ · open ${esc(j.apply_host)} again` : 'Applied ✓ · open the job again ↗') : d.paid ? `Apply${on} ↗` : `Apply free${on} ↗`;
   return `<a class="btn primary" id="apply" data-go href="${goHref(j.id)}" target="_blank" rel="noopener">${label}</a>`;
 }
 
@@ -1315,15 +1325,15 @@ async function jobPage(id) {
     <div class="card" style="margin-bottom:24px">
       <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">${seal(d.report.score, d.report.level, 64)}
         <div style="min-width:0;flex:1"><h1 style="font-size:clamp(24px,3vw,32px)">${esc(j.title)}</h1>
-          <div class="co"><button type="button" class="linkbtn" data-company="${d.company.id}">${esc(d.company.name)}</button><span>${remoteWhere(j.location)}</span><span>Posted ${esc(ago(j.posted_at))} via ${esc(j.source)}</span></div></div>
+          <div class="co"><button type="button" class="linkbtn" data-company="${d.company.id}">${esc(d.company.name)}</button><span>${remoteWhere(j.location)}</span><span>Posted ${esc(ago(j.posted_at))}${j.source ? ` via ${esc(j.source)}` : ''}</span></div></div>
         ${pill(d.report.level)}</div>
       <div class="tags"><span class="tag seg">${esc(d.segment.name)} pass</span>${j.category ? `<span class="tag">${esc(j.category)}</span>` : ''}<span class="tag">${salary(j)}</span>
         ${j.match != null ? `<span class="tag ${j.match >= 50 ? 'ok' : ''}">Skill match ${j.match}%</span>` : ''}</div>
       <div class="acts" style="margin-top:16px;align-items:center">
         ${applyControl(d)}
         <span class="hint">${!d.applied && state.user && d.free
-          ? `This uses free application ${d.trial.used + 1} of ${d.trial.limit}. You apply on the employer's own page (${esc(j.apply_host)}).`
-          : `You apply on the employer's original page (${esc(j.apply_host)}). We never ask you for money.`}</span></div>
+          ? `This uses free application ${d.trial.used + 1} of ${d.trial.limit}. We take you straight to the original job posting.`
+          : `You apply on the employer's original page${j.apply_host ? ` (${esc(j.apply_host)})` : ''}. We never ask you for money.`}</span></div>
     </div>
     <div class="grid2">
       <div class="stack">
