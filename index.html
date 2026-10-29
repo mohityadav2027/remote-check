@@ -573,7 +573,11 @@ function textChecks(text, website = '') {
   const site = hostOf(website || '');
   if (site) domains.push(site);
   for (const [name, domain] of Object.entries(BRANDS)) {
-    if (!new RegExp(`\\b${name}\\b`, 'i').test(text)) continue;
+    // Only when the post claims to hire for the brand ("Hiring for Amazon", "Amazon HR"),
+    // not when it mentions a product or tool ("Google Workspace", "AWS")
+    const claimsBrand = new RegExp(`\\b(hiring|recruit\\w*|work|jobs?|careers?|vacanc\\w*|openings?|positions?|join)\\b(\\s+\\w+){0,3}?\\s+(for|at|with|in)\\s+${name}\\b`
+      + `|\\b${name}\\s+(is\\s+)?(hiring|hr|recruit\\w*|careers?|jobs?|vacanc\\w*|work[\\s-]from[\\s-]home)\\b`, 'i');
+    if (!claimsBrand.test(text)) continue;
     if (domains.length && !domains.some(d => d.split('.').includes(domain))) {
       const brand = ['tcs', 'ibm', 'hcl'].includes(name) ? name.toUpperCase() : name[0].toUpperCase() + name.slice(1);
       hits.push({ label: `Uses ${brand}'s name, but not its website or email`, level: 'bad', impact: 25,
@@ -597,7 +601,84 @@ function registrableDomain(host) {
 }
 
 
-return { BOARDS, indiaEligible, classifySegment, textChecks, hostOf, TRUSTED_APPLY_HOSTS };
+const { lookupCompany } = (() => {
+// Fills in company details (founding year, website, employees, LinkedIn page, country) from Wikidata,
+// the free public database behind Wikipedia. Job listings don't include these, and we only post jobs
+// from companies we have proper details for.
+//
+// A Wikidata entry is accepted only if its name matches the company exactly (ignoring "Inc", "Ltd" etc.),
+// it describes a company, and it has both a founding date and an official website.
+// Runs in Node (importer) and, unchanged, in the browser preview.
+
+const COUNTRIES = { Q30: 'USA', Q668: 'India', Q145: 'UK', Q16: 'Canada', Q183: 'Germany', Q55: 'Netherlands', Q408: 'Australia',
+  Q334: 'Singapore', Q27: 'Ireland', Q142: 'France', Q29: 'Spain', Q38: 'Italy', Q39: 'Switzerland', Q34: 'Sweden', Q35: 'Denmark',
+  Q20: 'Norway', Q33: 'Finland', Q801: 'Israel', Q155: 'Brazil', Q96: 'Mexico', Q17: 'Japan', Q884: 'South Korea', Q148: 'China',
+  Q36: 'Poland', Q213: 'Czech Republic', Q191: 'Estonia', Q218: 'Romania', Q212: 'Ukraine', Q40: 'Austria', Q31: 'Belgium',
+  Q45: 'Portugal', Q664: 'New Zealand', Q258: 'South Africa', Q1033: 'Nigeria', Q114: 'Kenya', Q928: 'Philippines', Q252: 'Indonesia',
+  Q881: 'Vietnam', Q869: 'Thailand', Q833: 'Malaysia', Q878: 'UAE', Q414: 'Argentina', Q298: 'Chile', Q739: 'Colombia', Q32: 'Luxembourg',
+  Q41: 'Greece', Q43: 'Turkey', Q37: 'Lithuania', Q211: 'Latvia', Q28: 'Hungary', Q219: 'Bulgaria', Q224: 'Croatia', Q403: 'Serbia',
+  Q215: 'Slovenia', Q214: 'Slovakia', Q843: 'Pakistan', Q902: 'Bangladesh', Q854: 'Sri Lanka', Q79: 'Egypt', Q865: 'Taiwan', Q8646: 'Hong Kong' };
+const COMPANY_WORDS = /\b(company|business|enterprise|corporation|startup|start-up|firm|software|platform|provider|developer|publisher|agency|manufacturer|retailer|bank|service|organi[sz]ation|nonprofit|non-profit|website|marketplace|consultancy|studio)\b/i;
+const NOT_COMPANY = /disambiguation|given name|family name|surname|\bfilm\b|album|\bsong\b|novel|television series|village|city in|river|species|genus/i;
+
+const norm = name => String(name || '').toLowerCase()
+  .replace(/\(.*?\)/g, ' ')
+  .replace(/[,.]/g, ' ')
+  .replace(/\b(inc|llc|ltd|limited|gmbh|pvt|private|plc|corp|corporation|co|bv|ag|sa|sas|srl|pty|oy|ab|as)\b/g, ' ')
+  .replace(/\s+/g, ' ').trim();
+
+async function getJson(url) {
+  const headers = typeof window === 'undefined' ? { 'User-Agent': 'Parakh job site (company background checks)' } : {};
+  const res = await fetch(url, { headers, signal: AbortSignal.timeout(15000) });
+  if (!res.ok) throw new Error(`${res.status} from Wikidata`);
+  return res.json();
+}
+
+const claim = (entity, prop) => (entity.claims?.[prop] || []).filter(c => c.mainsnak?.datavalue).map(c => ({ value: c.mainsnak.datavalue.value, qualifiers: c.qualifiers }));
+
+// Pure: turn one Wikidata entity into company details, or null if it doesn't qualify.
+function detailsFromEntity(entity, companyName) {
+  const label = entity.labels?.en?.value || '';
+  const description = entity.descriptions?.en?.value || '';
+  if (!label || norm(label) !== norm(companyName)) return null;
+  if (NOT_COMPANY.test(description) || !COMPANY_WORDS.test(description)) return null;
+  const inception = claim(entity, 'P571')[0]?.value?.time;          // e.g. "+2011-10-01T00:00:00Z"
+  const website = claim(entity, 'P856')[0]?.value;
+  const year = inception && Number(inception.slice(1, 5));
+  if (!year || !website || !/^https?:\/\//.test(website)) return null;
+  // Employees: the most recent figure
+  const employees = claim(entity, 'P1128')
+    .map(c => ({ n: Number(c.value.amount), at: c.qualifiers?.P585?.[0]?.datavalue?.value?.time || '' }))
+    .filter(e => e.n > 0).sort((a, b) => b.at.localeCompare(a.at))[0]?.n ?? null;
+  const linkedin = claim(entity, 'P4264')[0]?.value;
+  const countryId = claim(entity, 'P17')[0]?.value?.id;
+  return {
+    founded_year: year, website, employee_count: employees ? Math.round(employees) : null,
+    linkedin_url: linkedin ? `https://www.linkedin.com/company/${linkedin}` : null,
+    hq_country: COUNTRIES[countryId] || null, wikidata_id: entity.id, description: description || null,
+  };
+}
+
+// Look a company up by name. Returns details or null.
+async function lookupCompany(name) {
+  const q = norm(name);
+  if (q.length < 2) return null;
+  const search = await getJson(`https://www.wikidata.org/w/api.php?action=wbsearchentities&format=json&origin=*&language=en&type=item&limit=5&search=${encodeURIComponent(name.replace(/\(.*?\)/g, '').trim())}`);
+  const ids = (search.search || []).filter(r => norm(r.label) === q).map(r => r.id).slice(0, 3);
+  if (!ids.length) return null;
+  const data = await getJson(`https://www.wikidata.org/w/api.php?action=wbgetentities&format=json&origin=*&props=labels|descriptions|claims&languages=en&ids=${ids.join('|')}`);
+  for (const id of ids) {
+    const details = data.entities?.[id] && detailsFromEntity(data.entities[id], name);
+    if (details) return details;
+  }
+  return null;
+}
+
+if (typeof module !== 'undefined') module.exports = { lookupCompany, detailsFromEntity, norm };
+
+return { lookupCompany };
+})();
+return { BOARDS, indiaEligible, classifySegment, textChecks, RED_FLAGS, hostOf, TRUSTED_APPLY_HOSTS, lookupCompany };
 })();</script>
 <script>// Public preview: loads REAL remote jobs from job websites in the visitor's browser and builds the same
 // job list, company reports and apply links the server builds. Uses the site's own parsers and checks (LIB).
@@ -640,17 +721,37 @@ const READY = (async () => {
     companies.get(k).jobs.push(j);
   }
 
-  // 4. Background checks that can run on listing data
+  // 4. Company details (founding year, website, size, LinkedIn) from Wikidata, a few lookups at a time.
+  //    Companies we can't find stay "waiting for details" and their jobs aren't posted.
+  const list4 = [...companies.values()];
+  let next = 0;
+  await Promise.all(Array.from({ length: 6 }, async () => {
+    while (next < list4.length) {
+      const c = list4[next++];
+      try { c.details = await withTimeout(LIB.lookupCompany(c.name), 15000); } catch { c.details = null; }
+    }
+  }));
+
+  // 5. One score per company (same formula as the server where the data exists), shown everywhere
+  const year = new Date().getFullYear();
   for (const c of companies.values()) {
-    const n = c.jobs.length, boards = new Set(c.jobs.flatMap(j => [...j.boards]));
+    const n = c.jobs.length, boards = new Set(c.jobs.flatMap(j => [...j.boards])), d = c.details;
     const signals = [];
     const add = (impact, label, detail = '') => signals.push({ impact, label, detail });
+    if (d) {
+      const age = year - d.founded_year;
+      if (age >= 5) add(+12, `Founded ${d.founded_year}`, `${age} years in business`);
+      else if (age >= 2) add(+6, `Founded ${d.founded_year}`, `${age} years in business`);
+      else add(-5, `Very young company (founded ${d.founded_year})`, 'Not a red flag alone, but check carefully');
+      if (d.employee_count >= 50) add(+8, `${d.employee_count}+ employees`);
+      else if (d.employee_count >= 10) add(+4, `${d.employee_count} employees`);
+      else if (d.employee_count) add(0, `Small team (${d.employee_count})`);
+      if (d.linkedin_url) add(+5, 'Has LinkedIn company page'); else add(-5, 'No LinkedIn company page');
+      add(0, `Website: ${LIB.hostOf(d.website) || d.website}`, 'Website age is checked on the full Parakh site');
+    }
     if (n > 25) add(+2, `${n} open remote roles right now`, 'Very high volume — check the roles are real');
-    else if (n >= 2) add(+8, `Actively hiring: ${n} open remote roles right now`);
-    else add(+4, '1 open remote role right now');
-    if (boards.size >= 2) add(+6, `Listed on ${boards.size} job websites`, [...boards].join(', '));
-    add(0, 'Founding year, team size and website age aren\'t in job listings', 'The full Parakh site adds these from company records and website lookups.');
-    c.signals = signals;
+    else add(+6, `Actively hiring: ${n} open remote role${n === 1 ? '' : 's'} right now`);
+    if (boards.size >= 2) add(+5, `Listed on ${boards.size} job websites`, [...boards].join(', '));
     const monthly = {};
     for (const j of c.jobs) if (j.posted_at) monthly[j.posted_at.slice(0, 7)] = (monthly[j.posted_at.slice(0, 7)] || 0) + 1;
     c.stats = {
@@ -659,51 +760,60 @@ const READY = (async () => {
       open: n, closed: '–', avgDaysOpen: null, reports: {},
       monthly: Object.entries(monthly).sort().slice(-12).map(([month, k]) => ({ month, n: k })),
     };
-    const score = Math.max(0, Math.min(100, 50 + signals.reduce((s, x) => s + x.impact, 0)));
+    const score = Math.max(0, Math.min(100, 40 + signals.reduce((s, x) => s + x.impact, 0)));
     c.report = { score, level: level(score), signals, stats: c.stats };
-    c.record = { id: c.id, name: c.name, feed: true, website: null, linkedin_url: null, founded_year: null, employee_count: null,
-      hq_country: null, description: `Hiring on ${[...boards].join(', ')}.` };
+    c.record = d
+      ? { id: c.id, name: c.name, website: d.website, linkedin_url: d.linkedin_url, founded_year: d.founded_year, employee_count: d.employee_count,
+          hq_country: d.hq_country, description: d.description, info_source: 'wikidata', wikidata_id: d.wikidata_id }
+      : { id: c.id, name: c.name, feed: true, website: null, linkedin_url: null, founded_year: null, employee_count: null, hq_country: null,
+          description: `Hiring on ${[...boards].join(', ')}.` };
+    c.missing = d ? [] : ['founding year', 'website'];
   }
 
+  // 6. Each job: pass/fail checks on the post itself, then the listing rules
+  //    (scam-like post → removed; company without details → waiting; company under 50 → removed)
   const lockedOf = r => ({ score: r.score, level: r.level, locked: true, signals: r.signals.slice(0, 2), hidden_signals: Math.max(0, r.signals.length - 2), stats: {} });
   const list = [], blocked = [];
+  let pending = 0;
   for (const j of jobs) {
     const c = companies.get(j.company.toLowerCase());
-    const signals = [...c.signals];
-    const add = (impact, label, detail = '') => signals.push({ impact, label, detail });
     const host = LIB.hostOf(j.apply_url);
-    if (host && LIB.TRUSTED_APPLY_HOSTS.test(host)) add(+8, `Apply link goes to ${host}`, 'Known job board or hiring system');
-    else add(-10, `Apply link goes to an unknown site (${host || 'invalid'})`);
-    for (const f of LIB.textChecks(`${j.title}\n${j.description || ''}`)) add(-f.impact, f.label, f.why);
-    if (j.posted_at) {
-      const d = Math.floor(daysAgo(j.posted_at));
-      if (d <= 30) add(+4, `Posted ${d <= 0 ? 'today' : d === 1 ? '1 day ago' : `${d} days ago`}`);
-      else if (d > 60) add(-5, 'Listing is over 2 months old', 'It may already be filled');
-    }
-    if (j.salary_min) add(+3, 'Pay is listed');
-    const score = Math.max(0, Math.min(100, 50 + signals.reduce((s, x) => s + x.impact, 0)));
-    const report = { score, level: level(score), signals, stats: c.stats };
+    const passed = [], problems = [];
+    const flags = LIB.textChecks(`${j.title}\n${j.description || ''}`, c.record.website || '');
+    for (const f of flags) problems.push({ label: f.label, detail: f.why, level: f.level });
+    if (!flags.length) passed.push({ label: 'No scam signs in the job post', detail: 'No fees, chat-app recruiters, personal emails or too-good-to-be-true pay' });
+    if (host && LIB.TRUSTED_APPLY_HOSTS.test(host)) passed.push({ label: `Apply link goes to ${host}`, detail: 'A known job board or hiring system' });
+    else problems.push({ label: `Apply link goes to an unknown site (${host || 'invalid'})`, detail: 'Genuine jobs apply through a known job board or the company\'s own site', level: 'bad' });
+    const jobCheck = { ok: !problems.some(p => p.level === 'bad'), passed, problems };
+    const status = !jobCheck.ok ? 'failed' : c.missing.length ? 'pending' : c.report.score < MIN_SCORE ? 'failed' : 'listed';
     const segment = LIB.classifySegment(j.title, j.category);
     const job = { id: j.id, company_id: c.id, title: j.title, segment, category: j.category || null, description: j.description || '',
       salary_min: j.salary_min || null, salary_max: j.salary_max || null, location: j.location || 'Worldwide', source: [...j.boards].join(', '),
       tags: (j.tags || []).join(','), posted_at: j.posted_at || new Date().toISOString(), apply_host: host };
-    DATA.job[j.id] = { job, company: c.record, segment: SEG_INFO[segment], unlocked: report, locked: lockedOf(report) };
+    DATA.job[j.id] = { job, company: c.record, segment: SEG_INFO[segment], unlocked: c.report, locked: lockedOf(c.report), job_check: jobCheck, status };
     DATA.applyUrl[j.id] = j.apply_url;
-    if (score < MIN_SCORE) {
-      const why = signals.filter(x => x.impact < 0).sort((a, b) => a.impact - b.impact).slice(0, 3).map(x => x.label);
-      DATA.job[j.id].removed = `"${j.title}" was removed. It scored ${score}/100 in our background check; we only post jobs scoring ${MIN_SCORE} or more.`
-        + (why.length ? ` Reasons: ${why.join('; ')}.` : '');
+    if (status === 'failed') {
+      const why = [...problems.filter(p => p.level === 'bad').map(p => p.label),
+        ...(c.report.score < MIN_SCORE ? c.report.signals.filter(x => x.impact < 0).map(x => x.label) : [])].slice(0, 4);
+      DATA.job[j.id].removed = `"${j.title}" was removed because it failed our background check`
+        + (c.report.score < MIN_SCORE ? ` (the company scored ${c.report.score}/100; we only post companies scoring ${MIN_SCORE} or more)` : '')
+        + `.${why.length ? ` Reasons: ${why.join('; ')}.` : ''}`;
       blocked.push({ title: j.title, company: c.name, why: why.join(' · ') });
       continue;
     }
-    list.push({ ...job, company_name: c.name, founded_year: null, hq_country: null, hq_city: null,
-      snippet: job.description.slice(0, 180), trust_score: score, trust_level: report.level });
+    if (status === 'pending') {
+      DATA.job[j.id].pending = `"${j.title}" isn't posted yet. We couldn't find ${c.name}'s founding year or website, so we can't run a full background check. We only post jobs from companies we have proper details for.`;
+      pending++;
+      continue;
+    }
+    list.push({ ...job, company_name: c.name, founded_year: c.record.founded_year, hq_country: c.record.hq_country, hq_city: null,
+      snippet: job.description.slice(0, 180), trust_score: c.report.score, trust_level: c.report.level });
   }
   for (const c of companies.values())
-    DATA.company[c.id] = { company: c.record, unlocked: c.report, locked: lockedOf(c.report),
+    DATA.company[c.id] = { company: c.record, missing: c.missing, unlocked: c.report, locked: lockedOf(c.report),
       jobs: c.jobs.map(j => ({ id: j.id, title: j.title, segment: DATA.job[j.id].job.segment, status: 'open', posted_at: DATA.job[j.id].job.posted_at,
-        removed: Boolean(DATA.job[j.id].removed) })) };
-  DATA.list = { jobs: list, categories: [...new Set(list.map(j => j.category).filter(Boolean))].sort(), hidden_risky: blocked.length,
+        removed: DATA.job[j.id].status === 'failed', pending: DATA.job[j.id].status === 'pending' })) };
+  DATA.list = { jobs: list, categories: [...new Set(list.map(j => j.category).filter(Boolean))].sort(), hidden_risky: blocked.length, pending,
     blocked: blocked.slice(0, 10), min_score: MIN_SCORE, companies: new Set(list.map(j => j.company_id)).size, last_refresh: new Date().toISOString() };
 })();
 </script>
@@ -727,17 +837,6 @@ function matchOf(job) {
   return Math.round(100 * skills.filter(s => text.includes(s)).length / skills.length);
 }
 
-// Same red-flag rules as the server's lib/verify.js (website age lookup needs the server, so it's skipped here)
-const RED_FLAGS = [
-  { re: /(registration|joining|security|training|processing|refundable|kit)\s*(fee|deposit|charge)|pay (a|the)? ?(small )?fee|pay\s*(₹|rs\.?|inr|\$)\s*\d/i, label: 'Asks you to pay money', why: 'Real employers never charge to apply, train or send an offer.', level: 'bad', impact: 25 },
-  { re: /whats\s?app|telegram|t\.me\/|wa\.me\//i, label: 'Recruiter only on WhatsApp or Telegram', why: 'Genuine recruiters use a company email or the company\'s hiring site.', level: 'bad', impact: 25 },
-  { re: /@(gmail|yahoo|outlook|hotmail|rediffmail|proton)\./i, label: 'Personal email address (Gmail, Yahoo…)', why: 'Recruiters at real companies write from the company\'s own domain.', level: 'bad', impact: 10 },
-  { re: /no (interview|experience) (needed|required).{0,40}(earn|\$|usd|₹)|earn\s*(\$|₹|rs\.?)\s*[\d,]{3,}.{0,20}(per|a|\/)\s*(day|week|task|hour)|per task|like (videos|posts)|rate (products|hotels)|task.based earning/i, label: 'Pay too good for the work', why: 'High daily pay for simple tasks is the most common task-scam hook.', level: 'bad', impact: 25 },
-  { re: /gift ?card|crypto(currency)? payment|bitcoin|usdt/i, label: 'Gift cards or crypto payments', why: 'Employers pay salaries by bank transfer, Wise or Payoneer, not gift cards or crypto.', level: 'bad', impact: 25 },
-  { re: /aadhaar|pan card|bank (details|account)|\botp\b|upi pin|send (your )?passport/i, label: 'Asks for ID or bank details early', why: 'Never share Aadhaar, PAN, bank details or OTPs before a signed offer.', level: 'bad', impact: 25 },
-  { re: /limited seats|urgent(ly)? hiring|only today|act now|last \d+ (seats|slots)/i, label: 'Pressure to act fast', why: 'Urgency is used to stop you from checking.', level: 'warn', impact: 8 },
-];
-const BRANDS = ['amazon', 'flipkart', 'google', 'microsoft', 'meta', 'tcs', 'infosys', 'wipro', 'accenture', 'deloitte', 'ibm', 'hcl', 'netflix', 'apple'];
 // Same CIN / LLPIN reading as lib/verify.js
 const CIN_STATES = { AN: 'Andaman and Nicobar', AP: 'Andhra Pradesh', AR: 'Arunachal Pradesh', AS: 'Assam', BR: 'Bihar', CH: 'Chandigarh', CT: 'Chhattisgarh', DL: 'Delhi',
   DN: 'Dadra and Nagar Haveli', GA: 'Goa', GJ: 'Gujarat', HP: 'Himachal Pradesh', HR: 'Haryana', JH: 'Jharkhand', JK: 'Jammu and Kashmir', KA: 'Karnataka', KL: 'Kerala',
@@ -758,26 +857,23 @@ function regCheck(raw, text) {
 }
 
 function scan({ text = '', company = '', website = '', cin = '' }) {
-  const hits = RED_FLAGS.filter(r => r.re.test(text));
-  const domains = [...text.matchAll(/@([a-z0-9-]+(?:\.[a-z0-9-]+)+)/gi), ...text.matchAll(/https?:\/\/([^\s/]+)/gi)].map(m => m[1].toLowerCase());
-  if (website) domains.push(website.toLowerCase().replace(/^https?:\/\//, '').split('/')[0]);
-  const checks = RED_FLAGS.map(r => ({ label: r.label, status: hits.includes(r) ? r.level : 'ok', detail: hits.includes(r) ? r.why : '' }));
+  // The site's own red-flag rules (LIB = lib/verify.js), including the brand-impersonation check
+  const hits = LIB.textChecks(text, website);
+  const checks = LIB.RED_FLAGS.map(r => { const h = hits.find(x => x.label === r.label); return { label: r.label, status: h ? r.level : 'ok', detail: h ? r.why : '' }; });
+  for (const h of hits) if (!LIB.RED_FLAGS.some(r => r.label === h.label)) checks.unshift({ label: h.label, status: h.level, detail: h.why });
   let impact = hits.reduce((s, h) => s + h.impact, 0), bad = hits.filter(h => h.level === 'bad').length;
-  const brand = BRANDS.find(b => new RegExp(`\\b${b}\\b`, 'i').test(text));
-  if (brand && domains.length && !domains.some(d => d.split('.').includes(brand))) {
-    const B = ['tcs', 'ibm', 'hcl'].includes(brand) ? brand.toUpperCase() : brand[0].toUpperCase() + brand.slice(1);
-    checks.unshift({ label: `Uses ${B}'s name, but not its website or email`, status: 'bad', detail: `Real ${B} recruiters write from their company email and list jobs on ${B}'s own careers site.` });
-    impact += 25; bad++;
-  }
   const reg = regCheck(cin, text);
   if (reg) { checks.push(reg); if (reg.bad) { impact += 30; bad++; } }
   const known = Object.values(DATA.company).find(c => company && c.company.name.toLowerCase() === company.trim().toLowerCase());
   const score = Math.max(0, Math.min(100, 80 - impact + (known?.unlocked.level === 'verified' ? 10 : 0)));
-  return { score, verdict: bad >= 2 || score < 45 ? 'scam' : bad === 1 || score < 70 ? 'suspicious' : 'clear', checks,
+  return { score, verdict: bad >= 2 || score < 50 ? 'scam' : bad === 1 || score < 70 ? 'suspicious' : 'clear', checks,
     known: known ? { id: known.company.id, name: known.company.name, website: known.company.website, score: known.unlocked.score, level: known.unlocked.level } : null };
 }
 
+const realFetch = window.fetch.bind(window);
 window.fetch = async (url, opts = {}) => {
+  // Only the site's own /api/ calls are answered here; job boards and Wikidata go to the real internet
+  if (!String(url).startsWith('/api/')) return realFetch(url, opts);
   const u = new URL(url, 'https://preview.local');
   const p = u.pathname, m = (opts.method || 'GET').toUpperCase();
   const body = typeof opts.body === 'string' ? JSON.parse(opts.body) : opts.body;
@@ -845,18 +941,19 @@ window.fetch = async (url, opts = {}) => {
   if ((x = p.match(/^\/api\/jobs\/(\d+)$/))) {
     const d = DATA.job[x[1]]; if (!d) return err(404, 'Job not found');
     if (d.removed) return err(410, d.removed, { code: 'REMOVED' });
+    if (d.pending) return err(410, d.pending, { code: 'PENDING' });
     const applied = mock.apps.some(a => a.job_id == x[1]);
     const paid = Boolean(mock.user && covers(d.job.segment));
     const free = Boolean(mock.user && !paid && (applied || trial().left > 0));
     const unlocked = paid || free;
-    return reply(200, { job: { ...d.job, match: matchOf(d.job) }, company: d.company, segment: d.segment, unlocked, paid, free,
+    return reply(200, { job: { ...d.job, match: matchOf(d.job) }, company: d.company, segment: d.segment, unlocked, paid, free, job_check: d.job_check,
       report: unlocked ? d.unlocked : d.locked, applied, trial: trial() });
   }
   if ((x = p.match(/^\/api\/companies\/(\d+)\/report$/))) return reply(200, { ok: true });
   if ((x = p.match(/^\/api\/companies\/(\d+)$/))) {
     const d = DATA.company[x[1]]; if (!d) return err(404, 'Company not found');
     const unlocked = Boolean(mock.user && (mock.plans.length || trial().left > 0));
-    return reply(200, { company: d.company, jobs: d.jobs, unlocked, report: unlocked ? d.unlocked : d.locked });
+    return reply(200, { company: d.company, missing: d.missing, jobs: d.jobs, unlocked, report: unlocked ? d.unlocked : d.locked });
   }
   return err(404, 'Not available in the preview');
 };
@@ -1014,7 +1111,8 @@ async function loadJobs(filters, first = false) {
   const verified = data.jobs.filter(j => j.trust_level === 'verified').length;
   $('#status').innerHTML = `<span><i class="dot" aria-hidden="true"></i><b>${data.jobs.length} checked job${data.jobs.length === 1 ? '' : 's'}</b> from <b>${data.companies} compan${data.companies === 1 ? 'y' : 'ies'}</b></span>
     <span><b>${verified}</b> verified · <b>${data.jobs.length - verified}</b> to check carefully</span>
-    <span>${data.last_refresh ? `Last refreshed ${esc(ago(data.last_refresh))}` : 'Refreshed every 6 hours'} · jobs scoring under ${data.min_score ?? 50} are not posted</span>`;
+    <span>${data.last_refresh ? `Last refreshed ${esc(ago(data.last_refresh))}` : 'Refreshed every 6 hours'} · jobs scoring under ${data.min_score ?? 50} are not posted</span>
+    ${data.pending ? `<span>${data.pending} more job${data.pending === 1 ? '' : 's'} not posted yet: we don't have proper details about ${data.pending === 1 ? 'that company' : 'those companies'}</span>` : ''}`;
   $('#count').textContent = `${data.jobs.length} shown`;
   $('#jobList').innerHTML = data.jobs.length ? data.jobs.map(j => `
     <article class="job">
@@ -1032,7 +1130,7 @@ async function loadJobs(filters, first = false) {
     : `<div class="empty"><b>No verified jobs match that search</b>Try another skill, company or plan.</div>`;
   const b = $('#blocked');
   b.hidden = !data.blocked.length;
-  $('#blockedTitle').textContent = `${data.hidden_risky} job${data.hidden_risky === 1 ? '' : 's'} not posted: scored under ${data.min_score ?? 50} in our checks`;
+  $('#blockedTitle').textContent = `${data.hidden_risky} job${data.hidden_risky === 1 ? '' : 's'} not posted: they failed our checks`;
   $('#blockedList').innerHTML = data.blocked.map(x => `<li><b>${esc(x.title)}</b> at ${esc(x.company)} · ${esc(x.why)}</li>`).join('');
 }
 
@@ -1043,10 +1141,13 @@ function reportHtml(c, r, unlocked) {
   const facts = `<dl class="facts">
     <div><dt>Founded</dt><dd>${c.founded_year ? `${c.founded_year} (${year - c.founded_year} yrs)` : unknown}</dd></div>
     <div><dt>Team size</dt><dd>${c.employee_count ? `${c.employee_count} people` : unknown}</dd></div>
-    <div><dt>Website since</dt><dd>${c.domain_created ? fmtDate(c.domain_created) : c.website ? 'Not checked yet' : c.feed ? unknown : 'No website'}</dd></div>
+    ${c.domain_created ? `<div><dt>Website since</dt><dd>${fmtDate(c.domain_created)}</dd></div>`
+      : c.website ? `<div><dt>Website</dt><dd><a href="${esc(c.website)}" target="_blank" rel="noopener">${esc(domainOf(c.website))}</a></dd></div>`
+      : `<div><dt>Website</dt><dd>${c.feed ? unknown : 'No website'}</dd></div>`}
     <div><dt>Hiring system</dt><dd>${c.ats_type ? `${ATS[c.ats_type]} careers page` : 'Job boards'}</dd></div>
     <div><dt>Headquarters</dt><dd>${c.hq_country ? `${c.hq_city ? esc(c.hq_city) + ', ' : ''}${esc(c.hq_country)}` : 'Not public'}</dd></div>
-    <div><dt>${/^india$/i.test(c.hq_country || '') || c.cin ? 'Indian registration (CIN)' : 'Registration'}</dt><dd>${c.cin ? esc(c.cin) : /^india$/i.test(c.hq_country || '') ? 'Not on record' : 'Outside India'}</dd></div></dl>`;
+    <div><dt>${/^india$/i.test(c.hq_country || '') || c.cin ? 'Indian registration (CIN)' : 'Registration'}</dt><dd>${c.cin ? esc(c.cin) : /^india$/i.test(c.hq_country || '') ? 'Not on record' : 'Outside India'}</dd></div></dl>
+    ${c.info_source ? `<p class="hint">Company details from ${c.info_source === 'wikidata' ? `<a href="https://www.wikidata.org/wiki/${esc(c.wikidata_id)}" target="_blank" rel="noopener">Wikidata</a>, the public database behind Wikipedia` : 'our team'}.</p>` : ''}`;
   const checks = `<ul class="checks">${r.signals.map(x => `<li>${stIcon(x.impact > 0 ? 'ok' : x.impact <= -8 ? 'bad' : x.impact < 0 ? 'warn' : 'n')}
     <span>${esc(x.label)}</span><span class="val">${x.impact > 0 ? '+' : ''}${x.impact}</span>${x.detail ? `<span class="det">${esc(x.detail)}</span>` : ''}</li>`).join('')}</ul>`;
   if (!unlocked) return `<div class="report-grid">${facts}<div><p class="sub">Checks</p>${checks}</div>
@@ -1076,7 +1177,7 @@ async function openCompany(id) {
   $('#drHead').innerHTML = `${seal(d.report.score, d.report.level, 56)}<div style="min-width:0"><h2 id="drTitle">${esc(c.name)}</h2>
     <p class="mono">${esc(domainOf(c.website) || 'no website')}${c.hq_country ? ' · ' + esc(c.hq_country) : ''}</p></div>
     <button type="button" class="btn ghost sm x" id="drClose" aria-label="Close report">✕</button>`;
-  const open = d.jobs.filter(j => j.status === 'open' && !j.removed);
+  const open = d.jobs.filter(j => j.status === 'open' && !j.removed && !j.pending);
   $('#drBody').innerHTML = `${c.description ? `<p>${esc(c.description)}</p>` : ''}${reportHtml(c, d.report, d.unlocked)}
     <div><p class="sub">Open jobs here (${open.length})</p>${open.map(j => `<div style="display:flex;justify-content:space-between;gap:10px;padding:10px 0;border-top:1px solid var(--line);font-size:14px">
       <a href="#/job/${j.id}">${esc(j.title)}</a><span class="hint">${esc(SEG[j.segment])}</span></div>`).join('') || '<p class="hint">None open right now.</p>'}</div>
@@ -1102,10 +1203,12 @@ async function companyPage(id) {
   const d = await api('/api/companies/' + id), c = d.company;
   $app.innerHTML = `<div class="sec-head"><div style="display:flex;gap:16px;align-items:center">${seal(d.report.score, d.report.level, 64)}
       <div><h1>${esc(c.name)}</h1><p>${esc(c.description || domainOf(c.website) || '')}</p></div></div>${pill(d.report.level)}</div>
+    ${d.missing?.length ? `<div class="notice">We don't have ${esc(c.name)}'s ${esc(d.missing.join(' or '))} yet, so its jobs aren't posted on Parakh. We only post jobs from companies we have proper details for.</div>` : ''}
     <div class="grid2"><div class="card"><h2>Background check</h2>${reportHtml(c, d.report, d.unlocked)}</div>
       <div class="card"><h2>Job history</h2><div class="scroll"><table class="admin"><thead><tr><th scope="col">Role</th><th scope="col">Posted</th><th scope="col">Status</th></tr></thead><tbody>
-        ${d.jobs.map(j => `<tr><td>${j.status === 'open' && !j.removed ? `<a href="#/job/${j.id}">${esc(j.title)}</a>` : esc(j.title)}</td><td class="mono">${fmtDate(j.posted_at)}</td>
-          <td>${j.removed ? '<span class="pill bad">removed: failed checks</span>' : `<span class="pill ${j.status === 'open' ? 'ok' : 'n'}">${j.status}</span>`}</td></tr>`).join('')}</tbody></table></div></div></div>`;
+        ${d.jobs.map(j => `<tr><td>${j.status === 'open' && !j.removed && !j.pending ? `<a href="#/job/${j.id}">${esc(j.title)}</a>` : esc(j.title)}</td><td class="mono">${fmtDate(j.posted_at)}</td>
+          <td>${j.removed ? '<span class="pill bad">removed: failed checks</span>' : j.pending ? '<span class="pill warn">not posted: company details missing</span>'
+            : `<span class="pill ${j.status === 'open' ? 'ok' : 'n'}">${j.status}</span>`}</td></tr>`).join('')}</tbody></table></div></div></div>`;
 }
 
 // ---------- job page ----------
@@ -1141,6 +1244,8 @@ async function jobPage(id) {
     <div class="grid2">
       <div class="stack">
         <div class="card"><h2>About the job</h2><div class="desc">${esc(j.description || 'See the original posting for details.')}</div></div>
+        <div class="card"><h2>Checks on this job post</h2><p class="hint" style="margin-bottom:8px">Pass or fail. A post that fails isn't shown on Parakh. The score above is the company's.</p>
+          <ul class="checks">${[...d.job_check.passed.map(c => ({ ...c, level: 'ok' })), ...d.job_check.problems].map(c => `<li>${stIcon(c.level)}<span>${esc(c.label)}</span><span></span>${c.detail ? `<span class="det">${esc(c.detail)}</span>` : ''}</li>`).join('')}</ul></div>
         ${state.user ? `<div class="card"><h2>Applied here before? Tell others</h2><p class="hint" style="margin-bottom:12px">Your answer changes this company's score.</p>
           <div class="acts">${[['hired', 'I got hired'], ['interview', 'Got an interview'], ['no_response', 'No response'], ['scam', 'Report a scam']]
             .map(([k, t]) => `<button type="button" class="btn sm" data-report="${k}">${t}</button>`).join('')}</div>
@@ -1407,7 +1512,8 @@ async function profilePage() {
 // ---------- admin ----------
 async function adminPage() {
   if (!state.user?.is_admin) { $app.innerHTML = '<div class="card"><h1 style="font-size:24px">Admins only</h1><p class="hint">Set ADMIN_EMAIL on the server and sign up with that email.</p></div>'; return; }
-  const [stats, companies, src, reqs] = await Promise.all([api('/api/admin/stats'), api('/api/admin/companies'), api('/api/admin/sources'), api('/api/admin/check-requests')]);
+  const [stats, companies, src, reqs, missing] = await Promise.all([api('/api/admin/stats'), api('/api/admin/companies'), api('/api/admin/sources'),
+    api('/api/admin/check-requests'), api('/api/admin/missing-details')]);
   $app.innerHTML = `
     <div class="sec-head"><div><h1>Admin</h1><p>Job sources, company check requests, and adding companies and jobs by hand.</p></div></div>
     <div class="card" style="margin-bottom:24px"><div class="stats">${Object.entries(stats).map(([k, v]) =>
@@ -1422,6 +1528,12 @@ async function adminPage() {
       </tbody></table></div>
       <p class="note">LinkedIn, Indeed, Naukri and Glassdoor don't offer a public jobs feed and don't allow copying their listings. Add their jobs below, using the original link as the apply URL.</p>
     </div>
+    <div class="card" style="margin-bottom:24px"><h2>Companies missing details</h2>
+      <p class="hint" style="margin-bottom:8px">Their jobs aren't posted until we know the founding year and website. We look these up on Wikidata after every import; fill in the rest by hand.</p>
+      ${missing.length ? `<div class="scroll"><table class="admin"><thead><tr><th scope="col">Company</th><th scope="col">Open jobs</th><th scope="col">Missing</th><th scope="col"><span class="sr-only">Action</span></th></tr></thead><tbody>
+      ${missing.map(m => `<tr><td>${esc(m.name)}</td><td class="mono">${m.open_jobs}</td><td>${esc(m.missing.join(', '))}</td>
+        <td><button type="button" class="btn sm" data-fill="${esc(m.name)}">Fill in</button></td></tr>`).join('')}</tbody></table></div>`
+      : '<p class="hint">None. Every company with open jobs has proper details.</p>'}</div>
     <div class="card" style="margin-bottom:24px"><h2>Companies people asked us to check</h2>${reqs.length ? `<div class="scroll"><table class="admin"><thead><tr>
         <th scope="col">Company</th><th scope="col">Website</th><th scope="col">Asked by</th><th scope="col">Status</th><th scope="col"><span class="sr-only">Action</span></th></tr></thead><tbody>
       ${reqs.map(r => `<tr><td>${esc(r.company)}${r.asks > 1 ? ` <span class="pill warn">${r.asks} asks</span>` : ''}</td><td>${esc(r.website || '–')}</td>
@@ -1459,6 +1571,9 @@ async function adminPage() {
         <div class="field full"><button class="btn primary">Add job</button></div></div></form>
     </div>`;
 
+  document.querySelectorAll('[data-fill]').forEach(b => b.addEventListener('click', () => {
+    $('#cName').value = b.dataset.fill; $('#cYear').focus(); $('#cf').scrollIntoView({ block: 'start' });
+  }));
   $('#imp').addEventListener('click', async e => {
     const b = e.currentTarget; b.disabled = true; b.textContent = 'Importing…';
     try {
