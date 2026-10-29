@@ -58,6 +58,54 @@ function renderNav(page) {
 }
 
 // ---------- jobs ----------
+// Company badge: initials on a colour picked from the name (no outside image service)
+const initials = name => String(name || '?').replace(/\(.*?\)/g, '').split(/\s+/).filter(w => /[a-z0-9]/i.test(w)).slice(0, 2).map(w => w[0].toUpperCase()).join('') || '?';
+const hueOf = name => [...String(name)].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) % 360, 7);
+
+// Saved jobs are remembered in this browser only
+const SAVED_KEY = 'parakh:saved';
+const savedJobs = () => { try { return new Set(JSON.parse(localStorage.getItem(SAVED_KEY) || '[]')); } catch { return new Set(); } };
+const setSaved = set => { try { localStorage.setItem(SAVED_KEY, JSON.stringify([...set])); } catch { /* private window: not remembered */ } };
+
+// Yearly USD pay as an approximate rupee figure, in lakhs: 70000 → "₹59L"
+const lakhs = usd => { const l = usd * state.fx / 1e5; return `₹${l >= 10 ? Math.round(l) : l.toFixed(1).replace(/\.0$/, '')}L`; };
+const usd = n => '$' + Math.round(n).toLocaleString('en-US');
+
+const BOOKMARK = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>';
+const skeletonCard = () => `<article class="job is-skeleton" aria-hidden="true">
+    <div class="job-head"><span class="sk sk-avatar"></span><div class="job-title-group"><span class="sk sk-title"></span><span class="sk sk-line"></span></div><span class="sk sk-seal"></span></div>
+    <div class="tags"><span class="sk sk-pill"></span><span class="sk sk-pill"></span><span class="sk sk-pill"></span></div>
+    <div class="job-foot"><span class="sk sk-line"></span><span class="sk sk-button"></span></div></article>`;
+
+function jobCard(j, saved) {
+  const isSaved = saved.has(j.id);
+  const skills = String(j.tags || '').split(',').map(s => s.trim()).filter(Boolean).slice(0, 3);
+  return `<article class="job">
+    <div class="job-head">
+      <span class="avatar" style="--h:${hueOf(j.company_name)}" aria-hidden="true">${esc(initials(j.company_name))}</span>
+      <div class="job-title-group">
+        <h2><a href="#/job/${j.id}">${esc(j.title)}</a></h2>
+        <p class="co"><button type="button" class="linkbtn" data-company="${j.company_id}">${esc(j.company_name)}</button>
+          ${j.hq_country ? `<span>HQ ${j.hq_city ? esc(j.hq_city) + ', ' : ''}${esc(j.hq_country)}</span>` : ''}
+          ${j.founded_year ? `<span>Founded ${j.founded_year}</span>` : ''}<span>${esc(ago(j.posted_at))}</span></p>
+      </div>
+      ${seal(j.trust_score, j.trust_level, 48)}
+      <button type="button" class="bookmark" data-save="${j.id}" aria-pressed="${isSaved}" aria-label="${isSaved ? 'Remove from saved jobs' : 'Save job'}: ${esc(j.title)}" title="${isSaved ? 'Saved' : 'Save job'}">${BOOKMARK}</button>
+    </div>
+    <div class="tags">
+      <span class="tag primary">${remoteWhere(j.location)}</span><span class="tag seg">${SEG[j.segment]}</span>
+      ${skills.map(s => `<span class="tag">${esc(s)}</span>`).join('')}
+      ${j.match != null ? `<span class="tag ${j.match >= 50 ? 'ok' : ''}">Skill match ${j.match}%</span>` : ''}
+    </div>
+    <div class="job-foot">
+      <div class="salary-group">${j.salary_min
+        ? `<span class="salary-pill">${usd(j.salary_min)} – ${usd(j.salary_max)} <small>/ yr</small></span>${state.fx ? `<span class="hint">≈ ${lakhs(j.salary_min)} – ${lakhs(j.salary_max)} a year</span>` : ''}`
+        : '<span class="salary-pill muted">Pay not listed</span>'}<span class="hint">via ${esc(j.source)}</span></div>
+      <a class="btn primary" href="#/job/${j.id}">View &amp; apply</a>
+    </div>
+  </article>`;
+}
+
 async function jobsPage() {
   const p = params();
   $app.innerHTML = `
@@ -76,16 +124,17 @@ async function jobsPage() {
       <div class="chips" role="group" aria-label="Filter by plan">${[['', 'All'], ...Object.entries(SEG)].map(([k, l]) =>
         `<button type="button" class="chip" data-seg="${k}" aria-pressed="${(p.get('segment') || '') === k}">${l}</button>`).join('')}</div>
       <button type="button" class="chip" id="hqIndia" aria-pressed="${p.get('hq') === 'India'}">Indian companies</button>
+      <button type="button" class="chip" id="savedOnly" aria-pressed="${p.get('saved') === '1'}">Saved</button>
       <label for="category" class="sr-only">Category</label>
       <select id="category" name="category"><option value="">All categories</option></select>
       <span class="count" id="count" role="status"></span>
     </form>
-    <div class="jobs" id="jobList"></div>
+    <div class="jobs" id="jobList" aria-busy="true">${skeletonCard().repeat(3)}</div>
     <details class="blocked" id="blocked" hidden><summary>${stIcon('bad')}<span id="blockedTitle"></span></summary><ul id="blockedList"></ul></details>
     <p class="sources" id="sources"></p>`;
 
   const f = $('#filters');
-  const filters = { q: p.get('q') || '', segment: p.get('segment') || '', category: p.get('category') || '', hq: p.get('hq') || '' };
+  const filters = { q: p.get('q') || '', segment: p.get('segment') || '', category: p.get('category') || '', hq: p.get('hq') || '', saved: p.get('saved') || '' };
   const update = () => {
     const qs = new URLSearchParams(Object.entries(filters).filter(([, v]) => v)).toString();
     history.replaceState(null, '', '#/' + (qs ? '?' + qs : ''));
@@ -104,7 +153,27 @@ async function jobsPage() {
     e.currentTarget.setAttribute('aria-pressed', Boolean(filters.hq));
     update();
   });
+  $('#savedOnly').addEventListener('click', e => {
+    filters.saved = filters.saved ? '' : '1';
+    e.currentTarget.setAttribute('aria-pressed', Boolean(filters.saved));
+    update();
+  });
+  // Save / unsave a job from its card
+  $('#jobList').addEventListener('click', e => {
+    const b = e.target.closest('[data-save]');
+    if (!b) return;
+    const id = Number(b.dataset.save), saved = savedJobs(), now = !saved.has(id);
+    now ? saved.add(id) : saved.delete(id);
+    setSaved(saved);
+    const title = b.closest('.job').querySelector('h2').textContent;
+    b.setAttribute('aria-pressed', now); b.title = now ? 'Saved' : 'Save job';
+    b.setAttribute('aria-label', `${now ? 'Remove from saved jobs' : 'Save job'}: ${title}`);
+    toast(now ? 'Saved. Find it under the Saved filter.' : 'Removed from saved jobs.');
+    if (filters.saved && !now) loadJobs(filters);
+  });
 
+  // Exchange rate for the rupee estimates on each card
+  if (!state.fx) state.fx = (await api('/api/pricing').catch(() => ({}))).fx_rate;
   await loadJobs(filters, true);
   api('/api/sources').then(({ sources }) => {
     $('#sources').innerHTML = `Jobs collected from ${sources.map(s => s.site ? `<a href="${esc(s.site)}" target="_blank" rel="noopener">${esc(s.label)}</a>` : esc(s.label)).join(', ')}. You always apply on the original listing.`;
@@ -122,20 +191,12 @@ async function loadJobs(filters, first = false) {
     <span><b>${verified}</b> verified · <b>${data.jobs.length - verified}</b> to check carefully</span>
     <span>${data.last_refresh ? `Last refreshed ${esc(ago(data.last_refresh))}` : 'Refreshed every 6 hours'} · jobs scoring under ${data.min_score ?? 50} are not posted</span>
     ${data.pending ? `<span>${data.pending} more job${data.pending === 1 ? '' : 's'} not posted yet: we don't have proper details about ${data.pending === 1 ? 'that company' : 'those companies'}</span>` : ''}`;
-  $('#count').textContent = `${data.jobs.length} shown`;
-  $('#jobList').innerHTML = data.jobs.length ? data.jobs.map(j => `
-    <article class="job">
-      ${seal(j.trust_score, j.trust_level)}
-      <div style="min-width:0">
-        <h2><a href="#/job/${j.id}">${esc(j.title)}</a></h2>
-        <div class="co"><button type="button" class="linkbtn" data-company="${j.company_id}">${esc(j.company_name)}</button>
-          <span>${remoteWhere(j.location)}</span>${j.hq_country ? `<span>HQ ${j.hq_city ? esc(j.hq_city) + ', ' : ''}${esc(j.hq_country)}</span>` : ''}${j.founded_year ? `<span>Founded ${j.founded_year}</span>` : ''}</div>
-        <div class="tags"><span class="tag seg">${SEG[j.segment]}</span>${j.category ? `<span class="tag">${esc(j.category)}</span>` : ''}
-          ${j.match != null ? `<span class="tag ${j.match >= 50 ? 'ok' : ''}">Skill match ${j.match}%</span>` : ''}<span class="tag">via ${esc(j.source)}</span><span class="tag">${esc(ago(j.posted_at))}</span></div>
-      </div>
-      <div class="side"><div class="pay">${salary(j)}</div>
-        <div class="acts"><button type="button" class="btn sm" data-company="${j.company_id}">Report</button><a class="btn primary sm" href="#/job/${j.id}">View &amp; apply</a></div></div>
-    </article>`).join('')
+  const saved = savedJobs();
+  const shown = filters.saved ? data.jobs.filter(j => saved.has(j.id)) : data.jobs;
+  $('#count').textContent = `${shown.length} shown`;
+  $('#jobList').removeAttribute('aria-busy');
+  $('#jobList').innerHTML = shown.length ? shown.map(j => jobCard(j, saved)).join('')
+    : filters.saved ? `<div class="empty"><b>No saved jobs yet</b>Tap the bookmark on a job to save it here.</div>`
     : `<div class="empty"><b>No verified jobs match that search</b>Try another skill, company or plan.</div>`;
   const b = $('#blocked');
   b.hidden = !data.blocked.length;
