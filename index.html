@@ -351,6 +351,24 @@ table.admin th { font-size: 12px; text-transform: uppercase; letter-spacing: .08
 .desc-body.folded::after { content: ""; position: absolute; inset: auto 0 0; height: 110px; background: linear-gradient(transparent, var(--surface)); }
 .job-desc .more { margin-top: 8px; color: var(--accent); font-weight: 600; }
 
+/* ---------- engagement ---------- */
+.job.fresh { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); box-shadow: 0 0 0 3px var(--accent-soft); }
+.fresh-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; padding: 12px 16px; border-radius: 12px;
+  background: linear-gradient(100deg, var(--accent-soft), var(--surface)); border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line)); animation: rise .4s both; }
+.fresh-bar .btn { margin-left: auto; }
+.spark { color: var(--accent); font-size: 18px; animation: twinkle 1.6s ease-in-out infinite; }
+@keyframes twinkle { 50% { transform: scale(1.35) rotate(20deg); opacity: .7; } }
+.viewed { display: flex; gap: 8px; align-items: center; overflow-x: auto; padding-bottom: 6px; margin-bottom: 12px; }
+.viewed .hint { flex: none; }
+.viewed a { flex: none; display: grid; text-decoration: none; padding: 6px 12px; border-radius: 9px; background: var(--surface); border: 1px solid var(--line); font-size: 13.5px; font-weight: 600;
+  max-width: 220px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: border-color .15s; }
+.viewed a:hover { border-color: var(--accent); }
+.viewed small { font-weight: 400; color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
+.similar { margin-top: 32px; } .similar .sec-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 12px; }
+.burst { position: fixed; z-index: 70; pointer-events: none; width: 0; height: 0; }
+.burst i { position: absolute; width: 8px; height: 8px; border-radius: 2px; background: var(--c); animation: burst .9s cubic-bezier(.2,.8,.2,1) forwards; }
+@keyframes burst { from { transform: rotate(var(--a)) translateY(0) scale(1); opacity: 1; } to { transform: rotate(var(--a)) translateY(calc(-1 * var(--d))) rotate(180deg) scale(.4); opacity: 0; } }
+
 /* ---------- motion ---------- */
 @keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
 @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
@@ -431,7 +449,8 @@ header.bar.scrolled { box-shadow: 0 6px 20px -12px rgb(8 14 24 / .35); }
 // Sites with no public API (LinkedIn, Indeed, Naukri, Glassdoor) forbid scraping in their terms,
 // so their jobs are added by hand from the Admin page with the original link as the apply URL.
 
-const INDIA_OK = /worldwide|anywhere|global|india|asia|apac|\bremote\s*$/i;
+// Indian cities count too: a remote job tied to Bengaluru or Pune is open to people in India
+const INDIA_OK = /worldwide|anywhere|global|india|asia|apac|\bremote\s*$|bengaluru|bangalore|mumbai|delhi|gurugram|gurgaon|noida|pune|hyderabad|chennai|kolkata|ahmedabad|jaipur|kochi/i;
 const REMOTE = /remote|anywhere|work from home|\bwfh\b|distributed/i;
 
 const stripHtml = s => (s || '')
@@ -831,7 +850,8 @@ if (typeof module !== 'undefined') module.exports = { lookupCompany, detailsFrom
 
 return { lookupCompany };
 })();
-return { BOARDS, indiaEligible, classifySegment, textChecks, RED_FLAGS, hostOf, TRUSTED_APPLY_HOSTS, lookupCompany };
+const INDIAN_COMPANIES = [{"name":"Razorpay","website":"https://razorpay.com","founded_year":2014,"hq_city":"Bengaluru","boards":["razorpay"]},{"name":"CRED","website":"https://cred.club","founded_year":2018,"hq_city":"Bengaluru","boards":["dreamplug"]},{"name":"Meesho","website":"https://www.meesho.com","founded_year":2015,"hq_city":"Bengaluru","boards":["meesho"]},{"name":"PhonePe","website":"https://www.phonepe.com","founded_year":2015,"hq_city":"Bengaluru","boards":["phonepe"]},{"name":"ShareChat","website":"https://sharechat.com","founded_year":2015,"hq_city":"Bengaluru","boards":["sharechat","mohallatech"]},{"name":"Paytm","website":"https://paytm.com","founded_year":2010,"hq_city":"Noida","boards":["paytm"]},{"name":"Groww","website":"https://groww.in","founded_year":2016,"hq_city":"Bengaluru","boards":["groww"]},{"name":"Swiggy","website":"https://www.swiggy.com","founded_year":2014,"hq_city":"Bengaluru","boards":["swiggy"]},{"name":"Dream Sports","website":"https://www.dreamsports.group","founded_year":2008,"hq_city":"Mumbai","boards":["dreamsports","dream11"]},{"name":"Unacademy","website":"https://unacademy.com","founded_year":2015,"hq_city":"Bengaluru","boards":["unacademy"]},{"name":"upGrad","website":"https://www.upgrad.com","founded_year":2015,"hq_city":"Mumbai","boards":["upgrad"]},{"name":"Juspay","website":"https://juspay.in","founded_year":2012,"hq_city":"Bengaluru","boards":["juspay"]},{"name":"Zeta","website":"https://www.zeta.tech","founded_year":2015,"hq_city":"Bengaluru","boards":["zetasuite"]},{"name":"InMobi","website":"https://www.inmobi.com","founded_year":2007,"hq_city":"Bengaluru","boards":["inmobi"]},{"name":"Urban Company","website":"https://www.urbancompany.com","founded_year":2014,"hq_city":"Gurugram","boards":["urbancompany","urbanclap"]},{"name":"Nykaa","website":"https://www.nykaa.com","founded_year":2012,"hq_city":"Mumbai","boards":["nykaa"]},{"name":"Ola","website":"https://www.olacabs.com","founded_year":2010,"hq_city":"Bengaluru","boards":["olacabs"]},{"name":"Spinny","website":"https://www.spinny.com","founded_year":2015,"hq_city":"Gurugram","boards":["spinny"]},{"name":"Slice","website":"https://www.sliceit.com","founded_year":2016,"hq_city":"Bengaluru","boards":["sliceit"]},{"name":"Jar","website":"https://www.myjar.app","founded_year":2021,"hq_city":"Bengaluru","boards":["myjar"]}];
+return { BOARDS, ats, INDIAN_COMPANIES, indiaEligible, classifySegment, textChecks, RED_FLAGS, hostOf, TRUSTED_APPLY_HOSTS, lookupCompany };
 })();</script>
 <script>// Public preview: loads REAL remote jobs from job websites in the visitor's browser and builds the same
 // job list, company reports and apply links the server builds. Uses the site's own parsers and checks (LIB).
@@ -854,6 +874,17 @@ const READY = (async () => {
     DATA.sources.push({ label: b.label, site: b.site, open: list.length, ok: r.status === 'fulfilled' });
     for (const j of list) raw.push({ ...j, source: b.key, board: b.label });
   });
+  // Indian companies' own careers pages: try each usual page name until one answers (browsers may block some)
+  const indian = await Promise.all(LIB.INDIAN_COMPANIES.map(async c => {
+    for (const board of c.boards) for (const type of Object.keys(LIB.ats)) {
+      try { return { c, label: `${c.name} careers page`, jobs: await withTimeout(LIB.ats[type].fetch(board, c.name), 12000) }; } catch { /* next */ }
+    }
+    return null;
+  }));
+  const indianOpen = indian.filter(Boolean).flatMap(x => x.jobs.filter(j => j.title && /^https?:\/\//.test(j.apply_url || '') && LIB.indiaEligible(j))
+    .map(j => ({ ...j, source: 'careers', board: x.label })));
+  raw.unshift(...indianOpen);   // the employer's own listing wins over a job-board copy
+  DATA.sources.push({ label: 'Indian company careers pages', site: null, open: indianOpen.length, ok: true });
   if (!raw.length) throw new Error('no jobs');
 
   // 2. The same job listed on several boards counts once; remember which boards list it
@@ -882,6 +913,10 @@ const READY = (async () => {
     while (next < list4.length) {
       const c = list4[next++];
       try { c.details = await withTimeout(LIB.lookupCompany(c.name), 15000); } catch { c.details = null; }
+      // Indian companies on our list: use the details we keep for them where Wikidata has none
+      const ours = LIB.INDIAN_COMPANIES.find(x => x.name.toLowerCase() === c.name.toLowerCase());
+      if (ours) c.details = { employee_count: null, linkedin_url: null, description: null, ...(c.details || {}),
+        founded_year: c.details?.founded_year || ours.founded_year, website: c.details?.website || ours.website, hq_country: 'India', hq_city: ours.hq_city };
     }
   }));
 
@@ -917,7 +952,7 @@ const READY = (async () => {
     c.report = { score, level: level(score), signals, stats: c.stats };
     c.record = d
       ? { id: c.id, name: c.name, website: d.website, linkedin_url: d.linkedin_url, founded_year: d.founded_year, employee_count: d.employee_count,
-          hq_country: d.hq_country, description: d.description, info_source: 'wikidata', wikidata_id: d.wikidata_id }
+          hq_country: d.hq_country, hq_city: d.hq_city || null, description: d.description, info_source: 'wikidata', wikidata_id: d.wikidata_id }
       : { id: c.id, name: c.name, feed: true, website: null, linkedin_url: null, founded_year: null, employee_count: null, hq_country: null,
           description: `Hiring on ${[...boards].join(', ')}.` };
     c.missing = d ? [] : ['founding year', 'website'];
@@ -959,7 +994,7 @@ const READY = (async () => {
       pending++;
       continue;
     }
-    list.push({ ...job, company_name: c.name, founded_year: c.record.founded_year, hq_country: c.record.hq_country, hq_city: null,
+    list.push({ ...job, company_name: c.name, founded_year: c.record.founded_year, hq_country: c.record.hq_country, hq_city: c.record.hq_city || null,
       snippet: job.description.slice(0, 180), trust_score: c.report.score, trust_level: c.report.level });
   }
   for (const c of companies.values())
@@ -1174,7 +1209,32 @@ const timeZone = loc => { const l = String(loc || '');
   return /india|asia|apac/i.test(l) ? 'IST-friendly hours' : /\b(us|usa|united states|americas?|canada|latam)\b/i.test(l) ? 'US hours (evening in India)'
     : /europe|emea|\buk\b/i.test(l) ? 'Europe hours (afternoon in India)' : null; };
 const isAsync = j => /\basync(hronous)?\b/i.test(postText(j));
-const isNew = j => Date.now() - new Date(String(j.posted_at).replace(' ', 'T') + (/Z|[+-]\d\d:?\d\d$/.test(j.posted_at) ? '' : 'Z')) < 2 * 864e5;
+const ts = s => new Date(String(s).replace(' ', 'T') + (/Z|[+-]\d\d:?\d\d$/.test(s) ? '' : 'Z')).getTime();   // server times are UTC
+const isNew = j => Date.now() - ts(j.posted_at) < 2 * 864e5;
+
+// Remembered in this browser only: when you last came, and the jobs you opened
+const store = { get: (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } },
+  set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* private window */ } } };
+// Jobs newer than your previous visit are marked "new for you" for the whole of this visit
+const visitBaseline = (() => {
+  let base; try { base = sessionStorage.getItem('parakh-baseline'); } catch { /* ignore */ }
+  if (base == null) { base = String(store.get('parakh-last-visit', 0)); try { sessionStorage.setItem('parakh-baseline', base); } catch { /* ignore */ } }
+  store.set('parakh-last-visit', Date.now());
+  return Number(base) || 0;
+})();
+const isFresh = j => visitBaseline > 0 && ts(j.posted_at) > visitBaseline;
+const rememberView = (j, company) => store.set('parakh-viewed',
+  [{ id: j.id, title: j.title, company }, ...store.get('parakh-viewed', []).filter(v => v.id !== j.id)].slice(0, 6));
+const untilText = ms => { const h = Math.floor(ms / 36e5), m = Math.max(1, Math.round(ms % 36e5 / 6e4)); return h ? `${h}h ${m}m` : `${m} min`; };
+
+// A small burst of colour when you apply
+function celebrate(el) {
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches || !el) return;
+  const r = el.getBoundingClientRect(), box = document.createElement('div');
+  box.className = 'burst'; box.style.left = r.left + r.width / 2 + 'px'; box.style.top = r.top + r.height / 2 + 'px';
+  box.innerHTML = Array.from({ length: 22 }, (_, i) => `<i style="--a:${i * 360 / 22}deg;--d:${50 + (i * 37) % 60}px;--c:${['var(--accent)', 'var(--ok)', '#3B82F6', '#EAB308'][i % 4]}"></i>`).join('');
+  document.body.append(box); setTimeout(() => box.remove(), 1000);
+}
 const perMonth = n => { const r = n * state.fx / 12; return r >= 1e5 ? `₹${(r / 1e5).toFixed(1).replace(/\.0$/, '')}L` : `₹${Math.round(r / 1000)}k`; };
 const freeN = () => state.trial?.limit ?? 2;   // free applications every new user gets
 const domainOf = url => { try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return ''; } };
@@ -1241,7 +1301,7 @@ const skeletonCard = () => `<article class="job is-skeleton" aria-hidden="true">
 function jobCard(j, saved, i = 0) {
   const isSaved = saved.has(j.id);
   const skills = String(j.tags || '').split(',').map(s => s.trim()).filter(Boolean).slice(0, 3);
-  return `<article class="job" style="--i:${Math.min(i, 10)}">
+  return `<article class="job${isFresh(j) ? ' fresh' : ''}" style="--i:${Math.min(i, 10)}">
     <div class="job-head">
       <span class="avatar" style="--h:${hueOf(j.company_name)}" aria-hidden="true">${esc(initials(j.company_name))}</span>
       <div class="job-title-group">
@@ -1254,7 +1314,7 @@ function jobCard(j, saved, i = 0) {
       <button type="button" class="bookmark" data-save="${j.id}" aria-pressed="${isSaved}" aria-label="${isSaved ? 'Remove from saved jobs' : 'Save job'}: ${esc(j.title)}" title="${isSaved ? 'Saved' : 'Save job'}">${BOOKMARK}</button>
     </div>
     <div class="tags">
-      ${isNew(j) ? '<span class="tag new">New</span>' : ''}<span class="tag primary">${remoteWhere(j.location)}</span><span class="tag seg">${SEG[j.segment]}</span>
+      ${isFresh(j) ? '<span class="tag new">New for you</span>' : isNew(j) ? '<span class="tag new">New</span>' : ''}<span class="tag primary">${remoteWhere(j.location)}</span><span class="tag seg">${SEG[j.segment]}</span>
       ${workType(j) ? `<span class="tag">${workType(j)}</span>` : ''}${timeZone(j.location) ? `<span class="tag tz">${CLOCK}${timeZone(j.location)}</span>` : ''}
       ${skills.map(s => `<span class="tag">${esc(s)}</span>`).join('')}
       ${j.match != null ? `<span class="tag ${j.match >= 50 ? 'ok' : ''}">Skill match ${j.match}%</span>` : ''}
@@ -1308,6 +1368,19 @@ const EMPTY_ART = `<svg class="empty-art" viewBox="0 0 120 80" aria-hidden="true
   <rect class="ln" x="22" y="28" width="40" height="6" rx="3"/><rect class="ln" x="22" y="40" width="28" height="6" rx="3"/>
   <circle class="lens" cx="82" cy="46" r="16"/><path class="handle" d="M94 58l14 14"/></svg>`;
 
+// Save / unsave a job from its card's bookmark. Returns true when the job is now saved.
+function toggleSave(b) {
+  const id = Number(b.dataset.save), saved = savedJobs(), now = !saved.has(id);
+  now ? saved.add(id) : saved.delete(id);
+  setSaved(saved);
+  const title = b.closest('.job').querySelector('h2').textContent;
+  b.setAttribute('aria-pressed', now); b.classList.remove('pop'); void b.offsetWidth; if (now) b.classList.add('pop');
+  b.title = now ? 'Saved' : 'Save job';
+  b.setAttribute('aria-label', `${now ? 'Remove from saved jobs' : 'Save job'}: ${title}`);
+  toast(now ? 'Saved. Find it under the Saved filter.' : 'Removed from saved jobs.');
+  return now;
+}
+
 async function jobsPage() {
   const p = params();
   $app.innerHTML = `
@@ -1340,12 +1413,15 @@ async function jobsPage() {
       <span class="count" id="count" role="status"></span>
     </form>
     <div class="roles" id="roles" role="group" aria-label="Browse by role" hidden></div>
+    <div class="fresh-bar" id="freshBar" hidden></div>
+    ${(() => { const v = store.get('parakh-viewed', []); return v.length ? `<nav class="viewed" aria-label="Recently viewed jobs"><span class="hint">Recently viewed</span>
+      ${v.map(x => `<a href="#/job/${x.id}">${esc(x.title)}<small>${esc(x.company)}</small></a>`).join('')}</nav>` : ''; })()}
     <div class="jobs" id="jobList" aria-busy="true">${skeletonCard().repeat(3)}</div>
     <details class="blocked" id="blocked" hidden><summary>${stIcon('bad')}<span id="blockedTitle"></span></summary><ul id="blockedList"></ul></details>
     <p class="sources" id="sources"></p>`;
 
   const f = $('#filters');
-  const filters = { q: p.get('q') || '', segment: p.get('segment') || '', category: p.get('category') || '', hq: p.get('hq') || '', saved: p.get('saved') || '', sort: p.get('sort') || '' };
+  const filters = { q: p.get('q') || '', segment: p.get('segment') || '', category: p.get('category') || '', hq: p.get('hq') || '', saved: p.get('saved') || '', sort: p.get('sort') || '', fresh: p.get('fresh') || '' };
   const update = () => {
     const qs = new URLSearchParams(Object.entries(filters).filter(([, v]) => v)).toString();
     loc._h = '#/' + (qs ? '?' + qs : '');
@@ -1361,6 +1437,7 @@ async function jobsPage() {
   f.category.addEventListener('change', () => { filters.category = f.category.value; update(); });
   f.sort.value = filters.sort;
   f.sort.addEventListener('change', () => { filters.sort = f.sort.value; update(); });
+  $('#freshBar').addEventListener('click', e => { if (e.target.closest('#freshOnly')) { filters.fresh = filters.fresh ? '' : '1'; update(); } });
   // Role tiles set the same category filter as the menu; tapping the active one clears it
   $('#roles').addEventListener('click', e => {
     const b = e.target.closest('[data-role]');
@@ -1383,16 +1460,7 @@ async function jobsPage() {
   // Save / unsave a job from its card
   $('#jobList').addEventListener('click', e => {
     const b = e.target.closest('[data-save]');
-    if (!b) return;
-    const id = Number(b.dataset.save), saved = savedJobs(), now = !saved.has(id);
-    now ? saved.add(id) : saved.delete(id);
-    setSaved(saved);
-    const title = b.closest('.job').querySelector('h2').textContent;
-    b.setAttribute('aria-pressed', now); b.classList.remove('pop'); void b.offsetWidth; if (now) b.classList.add('pop');
-    b.title = now ? 'Saved' : 'Save job';
-    b.setAttribute('aria-label', `${now ? 'Remove from saved jobs' : 'Save job'}: ${title}`);
-    toast(now ? 'Saved. Find it under the Saved filter.' : 'Removed from saved jobs.');
-    if (filters.saved && !now) loadJobs(filters);
+    if (b && !toggleSave(b) && filters.saved) loadJobs(filters);
   });
 
   // Exchange rate for the rupee estimates on each card
@@ -1414,11 +1482,17 @@ async function loadJobs(filters, first = false) {
   const verified = data.jobs.filter(j => j.trust_level === 'verified').length;
   $('#status').innerHTML = `<span><i class="dot" aria-hidden="true"></i><b><span data-count="${data.jobs.length}">${data.jobs.length}</span> checked job${data.jobs.length === 1 ? '' : 's'}</b> from <b><span data-count="${data.companies}">${data.companies}</span> compan${data.companies === 1 ? 'y' : 'ies'}</b></span>
     <span><b data-count="${verified}">${verified}</b> verified · <b>${data.jobs.length - verified}</b> to check carefully</span>
-    <span>${data.last_refresh ? `Last refreshed ${esc(ago(data.last_refresh))}` : 'Refreshed every 6 hours'} · jobs scoring under ${data.min_score ?? 50} are not posted</span>
+    <span>${(() => { const every = data.import_hours || 10, next = data.last_refresh && ts(data.last_refresh) + every * 36e5 - Date.now();
+      return next > 0 ? `Updated ${esc(ago(data.last_refresh))} · <b>next new jobs in ${untilText(next)}</b>` : `New jobs added every ${every} hours`; })()}</span>
+    <span>Jobs scoring under ${data.min_score ?? 50} are not posted</span>
     ${data.pending ? `<span>${data.pending} more job${data.pending === 1 ? '' : 's'} not posted yet: we don't have proper details about ${data.pending === 1 ? 'that company' : 'those companies'}</span>` : ''}`;
   countUp($('#status'));
   const saved = savedJobs();
-  const shown = filters.saved ? data.jobs.filter(j => saved.has(j.id)) : [...data.jobs];
+  const shown = (filters.saved ? data.jobs.filter(j => saved.has(j.id)) : [...data.jobs]).filter(j => !filters.fresh || isFresh(j));
+  const fresh = data.jobs.filter(isFresh).length, bar = $('#freshBar');
+  bar.hidden = !fresh;
+  if (fresh) bar.innerHTML = `<span class="spark" aria-hidden="true">✦</span><span><b>${fresh} new job${fresh === 1 ? '' : 's'}</b> since your last visit</span>
+    <button type="button" class="btn sm" id="freshOnly" aria-pressed="${Boolean(filters.fresh)}">${filters.fresh ? 'Show all jobs' : 'Show only new'}</button>`;
   if (filters.sort === 'score') shown.sort((a, b) => b.trust_score - a.trust_score);
   if (filters.sort === 'pay') shown.sort((a, b) => (b.salary_max || 0) - (a.salary_max || 0));
   // Browse by role: the biggest categories, counted once from the first list
@@ -1593,6 +1667,7 @@ async function jobPage(id) {
   if (!state.fx) state.fx = (await api('/api/pricing').catch(() => ({}))).fx_rate;
   const d = await api('/api/jobs/' + id), j = d.job;
   const c = d.company, year = new Date().getFullYear(), st = d.report.stats || {};
+  rememberView(j, c.name);
   const skills = String(j.tags || '').split(',').map(x => x.trim()).filter(Boolean).slice(0, 10);
   $app.innerHTML = `
     <section class="job-hero" style="--h:${hueOf(c.name)}">
@@ -1644,7 +1719,17 @@ async function jobPage(id) {
         <div class="card"><h2>Remote work at a glance</h2>${remoteGlance(j)}</div>
         <div class="card"><h2>Company background check</h2>${reportHtml(d.company, d.report, d.unlocked)}</div>
       </div>
-    </div>`;
+    </div>
+    <section class="similar" id="similar" hidden><div class="sec-head"><h2>Similar remote jobs</h2><a href="#/?category=${encodeURIComponent(j.category || '')}">See all</a></div><div class="jobs" id="similarList"></div></section>`;
+
+  // Similar jobs: same category (or the same plan when there's no category), checked the same way
+  api('/api/jobs?' + new URLSearchParams(j.category ? { category: j.category } : { segment: j.segment })).then(r => {
+    const list = r.jobs.filter(x => x.id !== j.id).slice(0, 3);
+    if (!list.length || !$('#similarList')) return;
+    $('#similarList').innerHTML = list.map((x, i) => jobCard(x, savedJobs(), i)).join('');
+    $('#similarList').addEventListener('click', e => { const b = e.target.closest('[data-save]'); if (b) toggleSave(b); });
+    $('#similar').hidden = false;
+  }).catch(() => {});
 
   // Long descriptions start folded, with a button to open them
   const body = $('#descBody');
@@ -1659,7 +1744,8 @@ async function jobPage(id) {
   }
 
   // The link itself opens the employer's page in a new tab; here we only refresh the counts.
-  $('#apply[data-go]')?.addEventListener('click', () => {
+  $('#apply[data-go]')?.addEventListener('click', e => {
+    celebrate(e.currentTarget);
     const usedFree = !d.applied && !d.paid && d.free;
     setTimeout(async () => {
       await loadMe();
@@ -1922,7 +2008,7 @@ async function adminPage() {
     <div class="card" style="margin-bottom:24px"><div class="stats">${Object.entries(stats).map(([k, v]) =>
       `<div class="stat"><b>${k === 'revenue_inr' ? inr(v) : v}</b><span class="hint">${k.replace(/_/g, ' ').replace(' inr', '')}</span></div>`).join('')}</div></div>
     <div class="card" style="margin-bottom:24px">
-      <div class="sec-head" style="margin-bottom:8px"><div><h2>Job sources</h2><p class="hint">Only roles open to India, Asia or worldwide are imported. Runs every 6 hours when AUTO_IMPORT=true.</p></div>
+      <div class="sec-head" style="margin-bottom:8px"><div><h2>Job sources</h2><p class="hint">Only roles open to India, Asia or worldwide are imported. Runs every 10 hours when AUTO_IMPORT=true (set IMPORT_HOURS to change it).</p></div>
         <button type="button" class="btn primary" id="imp">Run import now</button></div>
       <div class="scroll"><table class="admin"><thead><tr><th scope="col">Source</th><th scope="col">Last run</th><th scope="col">Jobs seen</th><th scope="col">New</th><th scope="col">Status</th></tr></thead><tbody>
         ${[...src.careers, ...src.boards].map(x => `<tr><td>${x.site ? `<a href="${esc(x.site)}" target="_blank" rel="noopener">${esc(x.label)}</a>` : esc(x.label)}</td>
