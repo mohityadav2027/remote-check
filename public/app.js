@@ -383,6 +383,44 @@ function applyControl(d) {
   return `<a class="btn primary" id="apply" data-go href="${goHref(j.id)}" target="_blank" rel="noopener">${label}</a>`;
 }
 
+// Company snapshot tiles on the job page
+const SNAP = {
+  founded: '<path d="M4 9h16M8 3v4M16 3v4"/><rect x="4" y="5" width="16" height="15" rx="2"/>',
+  team: '<circle cx="9" cy="8" r="3"/><path d="M3 19a6 6 0 0 1 12 0"/><path d="M16 5a3 3 0 0 1 0 6M18 19a6 6 0 0 0-2.5-4.9"/>',
+  hq: '<path d="M12 21s-7-6.2-7-12a7 7 0 0 1 14 0c0 5.8-7 12-7 12z"/><circle cx="12" cy="9" r="2.5"/>',
+  hiring: '<rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M3 13h18"/>',
+  web: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>',
+};
+const snap = (icon, label, value, sub) => `<div class="snap${icon === SNAP.web ? ' web' : ''}"><svg viewBox="0 0 24 24" aria-hidden="true">${icon}</svg>
+  <div><span class="lbl">${label}</span><b title="${value}">${value}</b>${sub ? `<small>${sub}</small>` : ''}</div></div>`;
+
+// Job description: section headings, bullet lists and short paragraphs, from the plain text we store
+const DESC_HEAD_WORDS = "about (?:the|this) (?:role|job|position|team|company)|about us|the role|your role|role overview|responsibilities|key responsibilities|what you(?:'|’)ll do|what you will do|requirements|qualifications|minimum qualifications|preferred qualifications|who you are|what we(?:'|’)re looking for|what you(?:'|’)ll bring|nice to have|bonus points|benefits|perks|what we offer|why join us|compensation|how to apply";
+const DESC_HEADINGS = new RegExp(`^(?:${DESC_HEAD_WORDS})\\b.{0,30}$`, 'i');
+function formatDesc(text) {
+  text = String(text || '').trim();
+  if (!text) return '<p class="hint">See the original posting for details.</p>';
+  // Older listings were saved as one long line: start a new line at each known heading and bullet
+  if (!text.includes('\n')) text = text
+    .replace(new RegExp(`\\s(${DESC_HEAD_WORDS})\\s*:\\s*`, 'gi'), '\n$1\n')
+    .replace(/\s[•●▪]\s/g, '\n• ');
+  let html = '', list = [];
+  const flush = () => { if (list.length) html += `<ul>${list.map(x => `<li>${esc(x)}</li>`).join('')}</ul>`; list = []; };
+  for (const raw of text.split('\n')) {
+    const line = raw.trim();
+    if (!line) continue;
+    const bullet = line.match(/^[•●▪*–-]\s*(.+)/);
+    if (bullet) { list.push(bullet[1]); continue; }
+    flush();
+    if (line.length < 70 && (DESC_HEADINGS.test(line.replace(/:$/, '')) || /:$/.test(line))) { html += `<h3>${esc(line.replace(/:$/, ''))}</h3>`; continue; }
+    // Split very long paragraphs every three sentences so they're easy to read
+    const sentences = line.match(/[^.!?]+[.!?]+(\s|$)|[^.!?]+$/g) || [line];
+    for (let i = 0; i < sentences.length; i += 3) html += `<p>${esc(sentences.slice(i, i + 3).join('').trim())}</p>`;
+  }
+  flush();
+  return html;
+}
+
 // What working on this job from India looks like, from what the posting says
 function remoteGlance(j) {
   const tz = timeZone(j.location);
@@ -404,23 +442,46 @@ function remoteGlance(j) {
 async function jobPage(id) {
   if (!state.fx) state.fx = (await api('/api/pricing').catch(() => ({}))).fx_rate;
   const d = await api('/api/jobs/' + id), j = d.job;
+  const c = d.company, year = new Date().getFullYear(), st = d.report.stats || {};
+  const skills = String(j.tags || '').split(',').map(x => x.trim()).filter(Boolean).slice(0, 10);
   $app.innerHTML = `
-    <div class="card" style="margin-bottom:24px">
-      <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">${seal(d.report.score, d.report.level, 64)}
-        <div style="min-width:0;flex:1"><h1 style="font-size:clamp(24px,3vw,32px)">${esc(j.title)}</h1>
-          <div class="co"><button type="button" class="linkbtn" data-company="${d.company.id}">${esc(d.company.name)}</button><span>${remoteWhere(j.location)}</span><span>Posted ${esc(ago(j.posted_at))}${j.source ? ` via ${esc(j.source)}` : ''}</span></div></div>
-        ${pill(d.report.level)}</div>
-      <div class="tags"><span class="tag seg">${esc(d.segment.name)} pass</span>${j.category ? `<span class="tag">${esc(j.category)}</span>` : ''}<span class="tag">${salary(j)}</span>
+    <section class="job-hero" style="--h:${hueOf(c.name)}">
+      <div class="job-hero-top">
+        <span class="avatar xl" style="--h:${hueOf(c.name)}" aria-hidden="true">${esc(initials(c.name))}</span>
+        <div class="job-hero-main">
+          <p class="eyebrow">${j.category ? esc(j.category) + ' · ' : ''}${esc(d.segment.name)} pass</p>
+          <h1>${esc(j.title)}</h1>
+          <p class="co"><button type="button" class="linkbtn" data-company="${c.id}">${esc(c.name)}</button><span>${remoteWhere(j.location)}</span>
+            <span>Posted ${esc(ago(j.posted_at))}${j.source ? ` via ${esc(j.source)}` : ''}</span></p>
+        </div>
+        <div class="job-hero-score">${seal(d.report.score, d.report.level, 72)}${pill(d.report.level)}</div>
+      </div>
+      <div class="tags">${isNew(j) ? '<span class="tag new">New</span>' : ''}<span class="tag primary">${remoteWhere(j.location)}</span>
+        ${workType(j) ? `<span class="tag">${workType(j)}</span>` : ''}${timeZone(j.location) ? `<span class="tag tz">${CLOCK}${timeZone(j.location)}</span>` : ''}
         ${j.match != null ? `<span class="tag ${j.match >= 50 ? 'ok' : ''}">Skill match ${j.match}%</span>` : ''}</div>
-      <div class="acts" style="margin-top:16px;align-items:center">
-        ${applyControl(d)}
-        <span class="hint">${!d.applied && state.user && d.free
+      <div class="job-hero-foot">
+        <div class="pay-big">${j.salary_min ? `<b>${usd(j.salary_min)} – ${usd(j.salary_max)}</b><span>a year${state.fx ? ` · about ${lakhs(j.salary_min)} – ${lakhs(j.salary_max)} in rupees` : ''}</span>` : '<b>Pay not listed</b><span>Ask during the interview</span>'}</div>
+        <div class="acts">${applyControl(d)}</div>
+      </div>
+      <p class="hint">${!d.applied && state.user && d.free
           ? `This uses free application ${d.trial.used + 1} of ${d.trial.limit}. We take you straight to the original job posting.`
-          : `You apply on the employer's original page${j.apply_host ? ` (${esc(j.apply_host)})` : ''}. We never ask you for money.`}</span></div>
-    </div>
+          : `You apply on the employer's original page${j.apply_host ? ` (${esc(j.apply_host)})` : ''}. We never ask you for money.`}</p>
+    </section>
+
+    <section class="snapshot" aria-label="Company at a glance">
+      ${snap(SNAP.founded, 'Founded', c.founded_year ? String(c.founded_year) : 'Not public', c.founded_year ? `${year - c.founded_year} years in business` : '')}
+      ${snap(SNAP.team, 'Team size', c.employee_count ? Number(c.employee_count).toLocaleString('en-IN') : 'Not public', c.employee_count ? 'people work here' : '')}
+      ${snap(SNAP.hq, 'Headquarters', c.hq_country ? esc(c.hq_country) : 'Not public', c.hq_city ? esc(c.hq_city) : '')}
+      ${snap(SNAP.hiring, 'Hiring now', st.posted90 != null ? `${st.posted90} job${st.posted90 === 1 ? '' : 's'}` : '—', 'posted in the last 90 days')}
+      ${snap(SNAP.web, 'Website', c.website ? esc(domainOf(c.website)) : 'Not public', c.domain_created ? `online since ${new Date(c.domain_created).getFullYear()}` : '')}
+    </section>
+    ${c.description ? `<p class="about-co"><b>About ${esc(c.name)}:</b> ${esc(c.description)}</p>` : ''}
     <div class="grid2">
       <div class="stack">
-        <div class="card"><h2>About the job</h2><div class="desc">${esc(j.description || 'See the original posting for details.')}</div></div>
+        <div class="card job-desc"><h2>About the job</h2>
+          ${skills.length ? `<div class="skills"><span class="hint">Skills mentioned</span>${skills.map(x => `<span class="tag">${esc(x)}</span>`).join('')}</div>` : ''}
+          <div class="desc-body" id="descBody">${formatDesc(j.description)}</div>
+          <button type="button" class="btn sm ghost more" id="descMore" hidden aria-expanded="false">Read full description</button></div>
         <div class="card"><h2>Checks on this job post</h2><p class="hint" style="margin-bottom:8px">Pass or fail. A post that fails isn't shown on Parakh. The score above is the company's.</p>
           <ul class="checks">${[...d.job_check.passed.map(c => ({ ...c, level: 'ok' })), ...d.job_check.problems].map(c => `<li>${stIcon(c.level)}<span>${esc(c.label)}</span><span></span>${c.detail ? `<span class="det">${esc(c.detail)}</span>` : ''}</li>`).join('')}</ul></div>
         ${state.user ? `<div class="card"><h2>Applied here before? Tell others</h2><p class="hint" style="margin-bottom:12px">Your answer changes this company's score.</p>
@@ -434,6 +495,18 @@ async function jobPage(id) {
         <div class="card"><h2>Company background check</h2>${reportHtml(d.company, d.report, d.unlocked)}</div>
       </div>
     </div>`;
+
+  // Long descriptions start folded, with a button to open them
+  const body = $('#descBody');
+  if (body.scrollHeight > 640) {
+    body.classList.add('folded');
+    $('#descMore').hidden = false;
+    $('#descMore').addEventListener('click', e => {
+      const open = body.classList.toggle('folded') === false;
+      e.currentTarget.setAttribute('aria-expanded', open);
+      e.currentTarget.textContent = open ? 'Show less' : 'Read full description';
+    });
+  }
 
   // The link itself opens the employer's page in a new tab; here we only refresh the counts.
   $('#apply[data-go]')?.addEventListener('click', () => {
