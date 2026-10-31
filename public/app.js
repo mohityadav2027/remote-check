@@ -106,6 +106,33 @@ function jobCard(j, saved, i = 0) {
   </article>`;
 }
 
+// ---------- graphics (inline SVG, coloured by the theme so they work in light and dark) ----------
+// Hero: India linked to companies around the world, with checked job cards floating over the globe
+const HERO_ART = `<svg class="hero-art" viewBox="0 0 360 250" aria-hidden="true" focusable="false">
+  <g class="globe"><circle cx="160" cy="135" r="98"/><ellipse cx="160" cy="135" rx="98" ry="36"/><ellipse cx="160" cy="135" rx="98" ry="72"/>
+    <ellipse cx="160" cy="135" rx="40" ry="98"/><ellipse cx="160" cy="135" rx="76" ry="98"/><path d="M62 135h196M160 37v196"/></g>
+  <g class="routes"><path d="M200 150 Q160 52 132 72"/><path d="M200 150 Q120 150 82 112"/><path d="M200 150 Q236 128 238 182"/></g>
+  <g class="city"><circle cx="132" cy="72" r="4"/><circle cx="82" cy="112" r="4"/><circle cx="238" cy="182" r="4"/></g>
+  <circle class="home-ring" cx="200" cy="150" r="7"/><circle class="home" cx="200" cy="150" r="6"/>
+  <text class="lbl" x="208" y="146">India</text>
+  <g class="float f1"><rect class="paper" x="236" y="26" width="112" height="62" rx="9"/>
+    <circle class="ring-trk" cx="258" cy="57" r="12"/><circle class="ring" cx="258" cy="57" r="12" pathLength="100" stroke-dasharray="100" stroke-dashoffset="12"/>
+    <text class="num" x="258" y="61">88</text><rect class="ln dark" x="278" y="44" width="56" height="7" rx="3.5"/><rect class="ln" x="278" y="57" width="40" height="6" rx="3"/>
+    <rect class="pill-ok" x="278" y="68" width="34" height="9" rx="4.5"/></g>
+  <g class="float f2"><rect class="paper" x="6" y="164" width="118" height="62" rx="9"/>
+    <path class="shield" d="M30 178l13 5v10c0 9-6 15-13 18-7-3-13-9-13-18v-10z"/><path class="tick" d="M24 195l5 5 8-9"/>
+    <rect class="ln dark" x="52" y="182" width="58" height="7" rx="3.5"/><rect class="ln" x="52" y="195" width="44" height="6" rx="3"/><rect class="ln" x="52" y="207" width="30" height="6" rx="3"/></g>
+  <g class="float f3"><circle class="lens" cx="300" cy="200" r="22"/><path class="handle" d="M316 216l18 18"/><path class="tick acc" d="M290 200l7 7 12-13"/></g>
+</svg>`;
+const STEP_ICONS = {
+  find: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>',
+  check: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/></svg>',
+  apply: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>',
+};
+const EMPTY_ART = `<svg class="empty-art" viewBox="0 0 120 80" aria-hidden="true"><rect class="paper" x="10" y="14" width="70" height="52" rx="8"/>
+  <rect class="ln" x="22" y="28" width="40" height="6" rx="3"/><rect class="ln" x="22" y="40" width="28" height="6" rx="3"/>
+  <circle class="lens" cx="82" cy="46" r="16"/><path class="handle" d="M94 58l14 14"/></svg>`;
+
 async function jobsPage() {
   const p = params();
   $app.innerHTML = `
@@ -116,8 +143,14 @@ async function jobsPage() {
         <p class="lede">We check each company's founding year, website age, how many jobs it posts, how many it fills, and whether the apply link is on the company's own hiring system. You apply on the employer's page.</p>
         <p class="lede"><b>Your first ${freeN()} applications are free</b>, with the full background check. ${state.user ? '' : '<a href="#/signup">Create a free account</a>'}</p>
       </div>
-      <div class="status" id="status" aria-live="polite"><span>Loading verified jobs…</span></div>
+      <div class="hero-side">${HERO_ART}
+        <div class="status" id="status" aria-live="polite"><span>Loading verified jobs…</span></div></div>
     </section>
+    <ol class="steps" aria-label="How it works">
+      <li>${STEP_ICONS.find}<div><b>Find a remote job</b><span>Real openings from job websites and company careers pages, open to India.</span></div></li>
+      <li>${STEP_ICONS.check}<div><b>We check the company</b><span>Founding year, website age, hiring history and scam signs. Under 50 isn't posted.</span></div></li>
+      <li>${STEP_ICONS.apply}<div><b>Apply on the employer's page</b><span>Your first ${freeN()} applications are free. We never take money for a job.</span></div></li>
+    </ol>
     <form class="toolbar" id="filters" role="search">
       <label for="q" class="sr-only">Search jobs</label>
       <input id="q" name="q" type="search" placeholder="Search role, skill or company" value="${esc(p.get('q'))}">
@@ -200,8 +233,8 @@ async function loadJobs(filters, first = false) {
   $('#count').textContent = `${shown.length} shown`;
   $('#jobList').removeAttribute('aria-busy');
   $('#jobList').innerHTML = shown.length ? shown.map((j, i) => jobCard(j, saved, i)).join('')
-    : filters.saved ? `<div class="empty"><b>No saved jobs yet</b>Tap the bookmark on a job to save it here.</div>`
-    : `<div class="empty"><b>No verified jobs match that search</b>Try another skill, company or plan.</div>`;
+    : filters.saved ? `<div class="empty">${EMPTY_ART}<b>No saved jobs yet</b>Tap the bookmark on a job to save it here.</div>`
+    : `<div class="empty">${EMPTY_ART}<b>No verified jobs match that search</b>Try another skill, company or plan.</div>`;
   const b = $('#blocked');
   b.hidden = !data.blocked.length;
   $('#blockedTitle').textContent = `${data.hidden_risky} job${data.hidden_risky === 1 ? '' : 's'} not posted: they failed our checks`;
@@ -690,7 +723,7 @@ async function route() {
     else if (page === 'login' || page === 'signup') authPage(page);
     else if (page === 'profile') await profilePage();
     else if (page === 'admin') await adminPage();
-    else $app.innerHTML = '<div class="empty"><b>Page not found</b><a href="#/">Go to jobs</a></div>';
+    else $app.innerHTML = `<div class="empty">${EMPTY_ART}<b>Page not found</b><a href="#/">Go to jobs</a></div>`;
   } catch (e) { $app.innerHTML = `<div class="notice bad" role="alert">${esc(e.message)}</div>`; }
   const h = $app.querySelector('h1');
   document.title = (h && page ? h.textContent.trim() + ' · ' : '') + 'Parakh – Verified remote jobs for India';
