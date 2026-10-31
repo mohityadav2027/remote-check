@@ -62,8 +62,11 @@ const FIXTURES = {
   ] },
 };
 
+// Careers pages answer only for the companies that have one; any other name is "404 not found"
+const ATS_BOARDS = { 'boards-api.greenhouse.io': ['gitlab'], 'api.lever.co': ['acme'], 'api.ashbyhq.com': ['ramp'] };
 global.fetch = async url => {
-  const host = new URL(url).hostname;
+  const { hostname: host, pathname } = new URL(url);
+  if (host in ATS_BOARDS && !ATS_BOARDS[host].some(b => pathname.split('/').includes(b))) return { ok: false, status: 404, json: async () => ({}), text: async () => '' };
   if (!(host in FIXTURES)) return { ok: false, status: 503, json: async () => ({}), text: async () => '' };
   const body = FIXTURES[host];
   return { ok: true, status: 200, json: async () => body, text: async () => (typeof body === 'string' ? body : JSON.stringify(body)) };
@@ -120,6 +123,24 @@ test('careers page links are recognised', () => {
   assert.equal(parseCareersUrl('https://www.linkedin.com/company/x'), null);
 });
 
+test('Indian companies are added with their details, and their careers page is found', async () => {
+  const { addIndianCompanies } = require('../lib/importer');
+  ATS_BOARDS['api.lever.co'].push('razorpay');
+  const found = await addIndianCompanies();
+  assert.deepEqual(found, ['Razorpay: lever/razorpay']);
+  const rp = db.prepare(`SELECT * FROM companies WHERE name = 'Razorpay'`).get();
+  assert.equal(rp.hq_country, 'India'); assert.equal(rp.founded_year, 2014); assert.equal(rp.ats_board, 'razorpay');
+  // A company with no careers page found is not searched again for a week; one that failed offline is retried
+  assert.ok(db.prepare(`SELECT ats_checked_at FROM companies WHERE name = 'Meesho'`).get().ats_checked_at);
+  assert.deepEqual(await addIndianCompanies(), []);
+  // Leave the import test below with only its own careers pages
+  ATS_BOARDS['api.lever.co'].pop();
+  db.prepare(`UPDATE companies SET ats_type = NULL, ats_board = NULL WHERE name = 'Razorpay'`).run();
+  // Indian cities count as open to India, but only for remote jobs
+  assert.ok(indiaEligible({ location: 'Remote - Bengaluru' }));
+  assert.ok(!indiaEligible({ location: 'Bengaluru', remote: false }));
+});
+
 test('import saves India-eligible jobs, skips duplicates, and closes jobs removed from a careers page', async () => {
   db.prepare(`INSERT INTO companies (name, ats_type, ats_board) VALUES ('GitLab', 'greenhouse', 'gitlab')`).run();
   // The same job also listed on a job board must not be counted twice
@@ -137,7 +158,7 @@ test('import saves India-eligible jobs, skips duplicates, and closes jobs remove
 
   // Re-running adds nothing new
   const second = await runImport();
-  assert.equal(Object.values(second).reduce((s, r) => s + r.added, 0), 0);
+  assert.equal(Object.values(second).reduce((s, r) => s + (r.added || 0), 0), 0);
 
   // The job disappears from GitLab's careers page -> marked closed
   FIXTURES['boards-api.greenhouse.io'].jobs = [];

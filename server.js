@@ -174,7 +174,7 @@ app.get('/api/jobs', (req, res) => {
   const categories = visibleCategories ?? db.prepare(`SELECT DISTINCT category FROM jobs WHERE status='open' AND category IS NOT NULL ORDER BY category`).all().map(r => r.category);
   res.json({ jobs: jobs.slice(0, 100), categories, min_score: MIN_SCORE, hidden_risky: blocked.length, blocked: blocked.slice(0, 10), pending,
     companies: new Set(jobs.map(j => j.company_id)).size,
-    last_refresh: db.prepare('SELECT MAX(last_run) t FROM source_status WHERE error IS NULL').get().t });
+    last_refresh: db.prepare('SELECT MAX(last_run) t FROM source_status WHERE error IS NULL').get().t, import_hours: IMPORT_HOURS });
 });
 
 app.get('/api/jobs/:id', ah(async (req, res) => {
@@ -488,10 +488,11 @@ app.get('/api/admin/stats', admin, (req, res) => {
 app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }));
 app.use((err, req, res, next) => { console.error(err); res.status(500).json({ error: err.message || 'Server error' }); });
 
-// Re-import jobs every 6 hours if enabled
+// Import new jobs every 10 hours (IMPORT_HOURS) if enabled
+const IMPORT_HOURS = Number(process.env.IMPORT_HOURS) || 10;
 if (process.env.AUTO_IMPORT === 'true') {
   runImport().then(r => console.log('Import:', r)).catch(console.error);
-  setInterval(() => runImport().catch(console.error), 6 * 3600e3);
+  setInterval(() => runImport().catch(console.error), IMPORT_HOURS * 3600e3);
 }
 
 const PORT = process.env.PORT || 3000;

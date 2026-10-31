@@ -88,4 +88,4 @@ Tests: `npm test` checks every source against sample responses, so it runs witho
 
 **Railway**: New Project → Deploy from GitHub repo (it uses the `Dockerfile`) → add a Volume mounted at `/app/data` → set `SESSION_SECRET`, `ADMIN_EMAIL`, `NODE_ENV=production`, `AUTO_IMPORT=true` → Settings → Networking → Generate Domain.
 
-The site lists only real jobs imported from job websites. With `AUTO_IMPORT=true` they're imported at startup and every 6 hours. (`lib/seed.js` holds fictional companies used only by automated tests, and loads only when `SEED_SAMPLE=true` is set.)
+The site lists only real jobs imported from job websites. With `AUTO_IMPORT=true` they're imported at startup and every 10 hours (change it with `IMPORT_HOURS`). Careers pages of well-known Indian companies (`lib/indian-companies.js`) are found and read automatically; only their remote jobs are imported. (`lib/seed.js` holds fictional companies used only by automated tests, and loads only when `SEED_SAMPLE=true` is set.)

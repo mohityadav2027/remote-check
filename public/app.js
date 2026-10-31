@@ -24,7 +24,32 @@ const timeZone = loc => { const l = String(loc || '');
   return /india|asia|apac/i.test(l) ? 'IST-friendly hours' : /\b(us|usa|united states|americas?|canada|latam)\b/i.test(l) ? 'US hours (evening in India)'
     : /europe|emea|\buk\b/i.test(l) ? 'Europe hours (afternoon in India)' : null; };
 const isAsync = j => /\basync(hronous)?\b/i.test(postText(j));
-const isNew = j => Date.now() - new Date(String(j.posted_at).replace(' ', 'T') + (/Z|[+-]\d\d:?\d\d$/.test(j.posted_at) ? '' : 'Z')) < 2 * 864e5;
+const ts = s => new Date(String(s).replace(' ', 'T') + (/Z|[+-]\d\d:?\d\d$/.test(s) ? '' : 'Z')).getTime();   // server times are UTC
+const isNew = j => Date.now() - ts(j.posted_at) < 2 * 864e5;
+
+// Remembered in this browser only: when you last came, and the jobs you opened
+const store = { get: (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } },
+  set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* private window */ } } };
+// Jobs newer than your previous visit are marked "new for you" for the whole of this visit
+const visitBaseline = (() => {
+  let base; try { base = sessionStorage.getItem('parakh-baseline'); } catch { /* ignore */ }
+  if (base == null) { base = String(store.get('parakh-last-visit', 0)); try { sessionStorage.setItem('parakh-baseline', base); } catch { /* ignore */ } }
+  store.set('parakh-last-visit', Date.now());
+  return Number(base) || 0;
+})();
+const isFresh = j => visitBaseline > 0 && ts(j.posted_at) > visitBaseline;
+const rememberView = (j, company) => store.set('parakh-viewed',
+  [{ id: j.id, title: j.title, company }, ...store.get('parakh-viewed', []).filter(v => v.id !== j.id)].slice(0, 6));
+const untilText = ms => { const h = Math.floor(ms / 36e5), m = Math.max(1, Math.round(ms % 36e5 / 6e4)); return h ? `${h}h ${m}m` : `${m} min`; };
+
+// A small burst of colour when you apply
+function celebrate(el) {
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches || !el) return;
+  const r = el.getBoundingClientRect(), box = document.createElement('div');
+  box.className = 'burst'; box.style.left = r.left + r.width / 2 + 'px'; box.style.top = r.top + r.height / 2 + 'px';
+  box.innerHTML = Array.from({ length: 22 }, (_, i) => `<i style="--a:${i * 360 / 22}deg;--d:${50 + (i * 37) % 60}px;--c:${['var(--accent)', 'var(--ok)', '#3B82F6', '#EAB308'][i % 4]}"></i>`).join('');
+  document.body.append(box); setTimeout(() => box.remove(), 1000);
+}
 const perMonth = n => { const r = n * state.fx / 12; return r >= 1e5 ? `₹${(r / 1e5).toFixed(1).replace(/\.0$/, '')}L` : `₹${Math.round(r / 1000)}k`; };
 const freeN = () => state.trial?.limit ?? 2;   // free applications every new user gets
 const domainOf = url => { try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return ''; } };
@@ -91,7 +116,7 @@ const skeletonCard = () => `<article class="job is-skeleton" aria-hidden="true">
 function jobCard(j, saved, i = 0) {
   const isSaved = saved.has(j.id);
   const skills = String(j.tags || '').split(',').map(s => s.trim()).filter(Boolean).slice(0, 3);
-  return `<article class="job" style="--i:${Math.min(i, 10)}">
+  return `<article class="job${isFresh(j) ? ' fresh' : ''}" style="--i:${Math.min(i, 10)}">
     <div class="job-head">
       <span class="avatar" style="--h:${hueOf(j.company_name)}" aria-hidden="true">${esc(initials(j.company_name))}</span>
       <div class="job-title-group">
@@ -104,7 +129,7 @@ function jobCard(j, saved, i = 0) {
       <button type="button" class="bookmark" data-save="${j.id}" aria-pressed="${isSaved}" aria-label="${isSaved ? 'Remove from saved jobs' : 'Save job'}: ${esc(j.title)}" title="${isSaved ? 'Saved' : 'Save job'}">${BOOKMARK}</button>
     </div>
     <div class="tags">
-      ${isNew(j) ? '<span class="tag new">New</span>' : ''}<span class="tag primary">${remoteWhere(j.location)}</span><span class="tag seg">${SEG[j.segment]}</span>
+      ${isFresh(j) ? '<span class="tag new">New for you</span>' : isNew(j) ? '<span class="tag new">New</span>' : ''}<span class="tag primary">${remoteWhere(j.location)}</span><span class="tag seg">${SEG[j.segment]}</span>
       ${workType(j) ? `<span class="tag">${workType(j)}</span>` : ''}${timeZone(j.location) ? `<span class="tag tz">${CLOCK}${timeZone(j.location)}</span>` : ''}
       ${skills.map(s => `<span class="tag">${esc(s)}</span>`).join('')}
       ${j.match != null ? `<span class="tag ${j.match >= 50 ? 'ok' : ''}">Skill match ${j.match}%</span>` : ''}
@@ -158,6 +183,19 @@ const EMPTY_ART = `<svg class="empty-art" viewBox="0 0 120 80" aria-hidden="true
   <rect class="ln" x="22" y="28" width="40" height="6" rx="3"/><rect class="ln" x="22" y="40" width="28" height="6" rx="3"/>
   <circle class="lens" cx="82" cy="46" r="16"/><path class="handle" d="M94 58l14 14"/></svg>`;
 
+// Save / unsave a job from its card's bookmark. Returns true when the job is now saved.
+function toggleSave(b) {
+  const id = Number(b.dataset.save), saved = savedJobs(), now = !saved.has(id);
+  now ? saved.add(id) : saved.delete(id);
+  setSaved(saved);
+  const title = b.closest('.job').querySelector('h2').textContent;
+  b.setAttribute('aria-pressed', now); b.classList.remove('pop'); void b.offsetWidth; if (now) b.classList.add('pop');
+  b.title = now ? 'Saved' : 'Save job';
+  b.setAttribute('aria-label', `${now ? 'Remove from saved jobs' : 'Save job'}: ${title}`);
+  toast(now ? 'Saved. Find it under the Saved filter.' : 'Removed from saved jobs.');
+  return now;
+}
+
 async function jobsPage() {
   const p = params();
   $app.innerHTML = `
@@ -190,12 +228,15 @@ async function jobsPage() {
       <span class="count" id="count" role="status"></span>
     </form>
     <div class="roles" id="roles" role="group" aria-label="Browse by role" hidden></div>
+    <div class="fresh-bar" id="freshBar" hidden></div>
+    ${(() => { const v = store.get('parakh-viewed', []); return v.length ? `<nav class="viewed" aria-label="Recently viewed jobs"><span class="hint">Recently viewed</span>
+      ${v.map(x => `<a href="#/job/${x.id}">${esc(x.title)}<small>${esc(x.company)}</small></a>`).join('')}</nav>` : ''; })()}
     <div class="jobs" id="jobList" aria-busy="true">${skeletonCard().repeat(3)}</div>
     <details class="blocked" id="blocked" hidden><summary>${stIcon('bad')}<span id="blockedTitle"></span></summary><ul id="blockedList"></ul></details>
     <p class="sources" id="sources"></p>`;
 
   const f = $('#filters');
-  const filters = { q: p.get('q') || '', segment: p.get('segment') || '', category: p.get('category') || '', hq: p.get('hq') || '', saved: p.get('saved') || '', sort: p.get('sort') || '' };
+  const filters = { q: p.get('q') || '', segment: p.get('segment') || '', category: p.get('category') || '', hq: p.get('hq') || '', saved: p.get('saved') || '', sort: p.get('sort') || '', fresh: p.get('fresh') || '' };
   const update = () => {
     const qs = new URLSearchParams(Object.entries(filters).filter(([, v]) => v)).toString();
     history.replaceState(null, '', '#/' + (qs ? '?' + qs : ''));
@@ -211,6 +252,7 @@ async function jobsPage() {
   f.category.addEventListener('change', () => { filters.category = f.category.value; update(); });
   f.sort.value = filters.sort;
   f.sort.addEventListener('change', () => { filters.sort = f.sort.value; update(); });
+  $('#freshBar').addEventListener('click', e => { if (e.target.closest('#freshOnly')) { filters.fresh = filters.fresh ? '' : '1'; update(); } });
   // Role tiles set the same category filter as the menu; tapping the active one clears it
   $('#roles').addEventListener('click', e => {
     const b = e.target.closest('[data-role]');
@@ -233,16 +275,7 @@ async function jobsPage() {
   // Save / unsave a job from its card
   $('#jobList').addEventListener('click', e => {
     const b = e.target.closest('[data-save]');
-    if (!b) return;
-    const id = Number(b.dataset.save), saved = savedJobs(), now = !saved.has(id);
-    now ? saved.add(id) : saved.delete(id);
-    setSaved(saved);
-    const title = b.closest('.job').querySelector('h2').textContent;
-    b.setAttribute('aria-pressed', now); b.classList.remove('pop'); void b.offsetWidth; if (now) b.classList.add('pop');
-    b.title = now ? 'Saved' : 'Save job';
-    b.setAttribute('aria-label', `${now ? 'Remove from saved jobs' : 'Save job'}: ${title}`);
-    toast(now ? 'Saved. Find it under the Saved filter.' : 'Removed from saved jobs.');
-    if (filters.saved && !now) loadJobs(filters);
+    if (b && !toggleSave(b) && filters.saved) loadJobs(filters);
   });
 
   // Exchange rate for the rupee estimates on each card
@@ -264,11 +297,17 @@ async function loadJobs(filters, first = false) {
   const verified = data.jobs.filter(j => j.trust_level === 'verified').length;
   $('#status').innerHTML = `<span><i class="dot" aria-hidden="true"></i><b><span data-count="${data.jobs.length}">${data.jobs.length}</span> checked job${data.jobs.length === 1 ? '' : 's'}</b> from <b><span data-count="${data.companies}">${data.companies}</span> compan${data.companies === 1 ? 'y' : 'ies'}</b></span>
     <span><b data-count="${verified}">${verified}</b> verified · <b>${data.jobs.length - verified}</b> to check carefully</span>
-    <span>${data.last_refresh ? `Last refreshed ${esc(ago(data.last_refresh))}` : 'Refreshed every 6 hours'} · jobs scoring under ${data.min_score ?? 50} are not posted</span>
+    <span>${(() => { const every = data.import_hours || 10, next = data.last_refresh && ts(data.last_refresh) + every * 36e5 - Date.now();
+      return next > 0 ? `Updated ${esc(ago(data.last_refresh))} · <b>next new jobs in ${untilText(next)}</b>` : `New jobs added every ${every} hours`; })()}</span>
+    <span>Jobs scoring under ${data.min_score ?? 50} are not posted</span>
     ${data.pending ? `<span>${data.pending} more job${data.pending === 1 ? '' : 's'} not posted yet: we don't have proper details about ${data.pending === 1 ? 'that company' : 'those companies'}</span>` : ''}`;
   countUp($('#status'));
   const saved = savedJobs();
-  const shown = filters.saved ? data.jobs.filter(j => saved.has(j.id)) : [...data.jobs];
+  const shown = (filters.saved ? data.jobs.filter(j => saved.has(j.id)) : [...data.jobs]).filter(j => !filters.fresh || isFresh(j));
+  const fresh = data.jobs.filter(isFresh).length, bar = $('#freshBar');
+  bar.hidden = !fresh;
+  if (fresh) bar.innerHTML = `<span class="spark" aria-hidden="true">✦</span><span><b>${fresh} new job${fresh === 1 ? '' : 's'}</b> since your last visit</span>
+    <button type="button" class="btn sm" id="freshOnly" aria-pressed="${Boolean(filters.fresh)}">${filters.fresh ? 'Show all jobs' : 'Show only new'}</button>`;
   if (filters.sort === 'score') shown.sort((a, b) => b.trust_score - a.trust_score);
   if (filters.sort === 'pay') shown.sort((a, b) => (b.salary_max || 0) - (a.salary_max || 0));
   // Browse by role: the biggest categories, counted once from the first list
@@ -443,6 +482,7 @@ async function jobPage(id) {
   if (!state.fx) state.fx = (await api('/api/pricing').catch(() => ({}))).fx_rate;
   const d = await api('/api/jobs/' + id), j = d.job;
   const c = d.company, year = new Date().getFullYear(), st = d.report.stats || {};
+  rememberView(j, c.name);
   const skills = String(j.tags || '').split(',').map(x => x.trim()).filter(Boolean).slice(0, 10);
   $app.innerHTML = `
     <section class="job-hero" style="--h:${hueOf(c.name)}">
@@ -494,7 +534,17 @@ async function jobPage(id) {
         <div class="card"><h2>Remote work at a glance</h2>${remoteGlance(j)}</div>
         <div class="card"><h2>Company background check</h2>${reportHtml(d.company, d.report, d.unlocked)}</div>
       </div>
-    </div>`;
+    </div>
+    <section class="similar" id="similar" hidden><div class="sec-head"><h2>Similar remote jobs</h2><a href="#/?category=${encodeURIComponent(j.category || '')}">See all</a></div><div class="jobs" id="similarList"></div></section>`;
+
+  // Similar jobs: same category (or the same plan when there's no category), checked the same way
+  api('/api/jobs?' + new URLSearchParams(j.category ? { category: j.category } : { segment: j.segment })).then(r => {
+    const list = r.jobs.filter(x => x.id !== j.id).slice(0, 3);
+    if (!list.length || !$('#similarList')) return;
+    $('#similarList').innerHTML = list.map((x, i) => jobCard(x, savedJobs(), i)).join('');
+    $('#similarList').addEventListener('click', e => { const b = e.target.closest('[data-save]'); if (b) toggleSave(b); });
+    $('#similar').hidden = false;
+  }).catch(() => {});
 
   // Long descriptions start folded, with a button to open them
   const body = $('#descBody');
@@ -509,7 +559,8 @@ async function jobPage(id) {
   }
 
   // The link itself opens the employer's page in a new tab; here we only refresh the counts.
-  $('#apply[data-go]')?.addEventListener('click', () => {
+  $('#apply[data-go]')?.addEventListener('click', e => {
+    celebrate(e.currentTarget);
     const usedFree = !d.applied && !d.paid && d.free;
     setTimeout(async () => {
       await loadMe();
@@ -772,7 +823,7 @@ async function adminPage() {
     <div class="card" style="margin-bottom:24px"><div class="stats">${Object.entries(stats).map(([k, v]) =>
       `<div class="stat"><b>${k === 'revenue_inr' ? inr(v) : v}</b><span class="hint">${k.replace(/_/g, ' ').replace(' inr', '')}</span></div>`).join('')}</div></div>
     <div class="card" style="margin-bottom:24px">
-      <div class="sec-head" style="margin-bottom:8px"><div><h2>Job sources</h2><p class="hint">Only roles open to India, Asia or worldwide are imported. Runs every 6 hours when AUTO_IMPORT=true.</p></div>
+      <div class="sec-head" style="margin-bottom:8px"><div><h2>Job sources</h2><p class="hint">Only roles open to India, Asia or worldwide are imported. Runs every 10 hours when AUTO_IMPORT=true (set IMPORT_HOURS to change it).</p></div>
         <button type="button" class="btn primary" id="imp">Run import now</button></div>
       <div class="scroll"><table class="admin"><thead><tr><th scope="col">Source</th><th scope="col">Last run</th><th scope="col">Jobs seen</th><th scope="col">New</th><th scope="col">Status</th></tr></thead><tbody>
         ${[...src.careers, ...src.boards].map(x => `<tr><td>${x.site ? `<a href="${esc(x.site)}" target="_blank" rel="noopener">${esc(x.label)}</a>` : esc(x.label)}</td>
