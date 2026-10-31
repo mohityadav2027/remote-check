@@ -16,6 +16,16 @@ const ago = d => { const days = Math.floor((Date.now() - parseDate(d)) / 864e5);
 const salary = j => (j.salary_min ? `$${Math.round(j.salary_min / 1000)}k–$${Math.round(j.salary_max / 1000)}k / yr` : 'Pay not listed');
 // Every job on Parakh is remote; show who can apply, e.g. "Remote · India"
 const remoteWhere = loc => { const l = String(loc || '').replace(/^remote\s*[,·–-]?\s*/i, '').trim(); return `Remote · ${esc(l || 'Worldwide')}`; };
+// Remote-work details read from the posting itself (title, tags, description, location); shown only when the posting says so
+const postText = j => `${j.title} ${j.tags || ''} ${j.description || j.snippet || ''}`;
+const workType = j => { const t = postText(j);
+  return /\bintern(ship)?\b/i.test(t) ? 'Internship' : /part[- ]?time/i.test(t) ? 'Part-time' : /\b(contract|contractor|freelance)\b/i.test(t) ? 'Contract' : /full[- ]?time/i.test(t) ? 'Full-time' : null; };
+const timeZone = loc => { const l = String(loc || '');
+  return /india|asia|apac/i.test(l) ? 'IST-friendly hours' : /\b(us|usa|united states|americas?|canada|latam)\b/i.test(l) ? 'US hours (evening in India)'
+    : /europe|emea|\buk\b/i.test(l) ? 'Europe hours (afternoon in India)' : null; };
+const isAsync = j => /\basync(hronous)?\b/i.test(postText(j));
+const isNew = j => Date.now() - new Date(String(j.posted_at).replace(' ', 'T') + (/Z|[+-]\d\d:?\d\d$/.test(j.posted_at) ? '' : 'Z')) < 2 * 864e5;
+const perMonth = n => { const r = n * state.fx / 12; return r >= 1e5 ? `₹${(r / 1e5).toFixed(1).replace(/\.0$/, '')}L` : `₹${Math.round(r / 1000)}k`; };
 const freeN = () => state.trial?.limit ?? 2;   // free applications every new user gets
 const domainOf = url => { try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return ''; } };
 const params = () => new URLSearchParams(location.hash.split('?')[1] || '');
@@ -71,6 +81,7 @@ const setSaved = set => { try { localStorage.setItem(SAVED_KEY, JSON.stringify([
 const lakhs = usd => { const l = usd * state.fx / 1e5; return `₹${l >= 10 ? Math.round(l) : l.toFixed(1).replace(/\.0$/, '')}L`; };
 const usd = n => '$' + Math.round(n).toLocaleString('en-US');
 
+const CLOCK = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>';
 const BOOKMARK = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>';
 const skeletonCard = () => `<article class="job is-skeleton" aria-hidden="true">
     <div class="job-head"><span class="sk sk-avatar"></span><div class="job-title-group"><span class="sk sk-title"></span><span class="sk sk-line"></span></div><span class="sk sk-seal"></span></div>
@@ -93,7 +104,8 @@ function jobCard(j, saved, i = 0) {
       <button type="button" class="bookmark" data-save="${j.id}" aria-pressed="${isSaved}" aria-label="${isSaved ? 'Remove from saved jobs' : 'Save job'}: ${esc(j.title)}" title="${isSaved ? 'Saved' : 'Save job'}">${BOOKMARK}</button>
     </div>
     <div class="tags">
-      <span class="tag primary">${remoteWhere(j.location)}</span><span class="tag seg">${SEG[j.segment]}</span>
+      ${isNew(j) ? '<span class="tag new">New</span>' : ''}<span class="tag primary">${remoteWhere(j.location)}</span><span class="tag seg">${SEG[j.segment]}</span>
+      ${workType(j) ? `<span class="tag">${workType(j)}</span>` : ''}${timeZone(j.location) ? `<span class="tag tz">${CLOCK}${timeZone(j.location)}</span>` : ''}
       ${skills.map(s => `<span class="tag">${esc(s)}</span>`).join('')}
       ${j.match != null ? `<span class="tag ${j.match >= 50 ? 'ok' : ''}">Skill match ${j.match}%</span>` : ''}
     </div>
@@ -129,6 +141,19 @@ const STEP_ICONS = {
   check: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/></svg>',
   apply: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>',
 };
+// Small icons for the "Browse by role" tiles, picked by the category name
+const ROLE_ICONS = [
+  [/software|develop|engineer|\bit\b|security/i, '<path d="M8 8l-4 4 4 4M16 8l4 4-4 4M13.5 5l-3 14"/>'],
+  [/design|video/i, '<path d="M4 20l4-1 11-11-3-3L5 16z"/><path d="M14 6l3 3"/>'],
+  [/market|sales|e-?commerce/i, '<path d="M4 10v4h3l6 4V6L7 10z"/><path d="M17 9a4 4 0 0 1 0 6"/>'],
+  [/customer|support|trust/i, '<path d="M5 13v-1a7 7 0 0 1 14 0v1"/><rect x="3" y="13" width="4" height="6" rx="1.5"/><rect x="17" y="13" width="4" height="6" rx="1.5"/>'],
+  [/data|\bai\b/i, '<path d="M5 20V11M12 20V5M19 20v-7"/>'],
+  [/finance|account|legal/i, '<path d="M7 5h10M7 9h10M9 5c4 0 6 2 6 4s-2 4-6 4l7 6"/>'],
+  [/teach|writ|transl|transcri/i, '<path d="M4 6h7a2 2 0 0 1 2 2v12a2 2 0 0 0-2-2H4z"/><path d="M20 6h-7v14a2 2 0 0 1 2-2h5z"/>'],
+  [/human|\bhr\b|admin|health|nonprofit/i, '<circle cx="9" cy="8" r="3"/><path d="M3 19a6 6 0 0 1 12 0"/><path d="M16 5a3 3 0 0 1 0 6M18 19a6 6 0 0 0-2.5-4.9"/>'],
+  [/./, '<rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M3 13h18"/>'],
+];
+const roleIcon = c => `<svg viewBox="0 0 24 24" aria-hidden="true">${ROLE_ICONS.find(([re]) => re.test(c))[1]}</svg>`;
 const EMPTY_ART = `<svg class="empty-art" viewBox="0 0 120 80" aria-hidden="true"><rect class="paper" x="10" y="14" width="70" height="52" rx="8"/>
   <rect class="ln" x="22" y="28" width="40" height="6" rx="3"/><rect class="ln" x="22" y="40" width="28" height="6" rx="3"/>
   <circle class="lens" cx="82" cy="46" r="16"/><path class="handle" d="M94 58l14 14"/></svg>`;
@@ -160,14 +185,17 @@ async function jobsPage() {
       <button type="button" class="chip" id="savedOnly" aria-pressed="${p.get('saved') === '1'}">Saved</button>
       <label for="category" class="sr-only">Category</label>
       <select id="category" name="category"><option value="">All categories</option></select>
+      <label for="sort" class="sr-only">Sort jobs</label>
+      <select id="sort" name="sort"><option value="">Newest first</option><option value="score">Best trust score</option><option value="pay">Highest pay</option></select>
       <span class="count" id="count" role="status"></span>
     </form>
+    <div class="roles" id="roles" role="group" aria-label="Browse by role" hidden></div>
     <div class="jobs" id="jobList" aria-busy="true">${skeletonCard().repeat(3)}</div>
     <details class="blocked" id="blocked" hidden><summary>${stIcon('bad')}<span id="blockedTitle"></span></summary><ul id="blockedList"></ul></details>
     <p class="sources" id="sources"></p>`;
 
   const f = $('#filters');
-  const filters = { q: p.get('q') || '', segment: p.get('segment') || '', category: p.get('category') || '', hq: p.get('hq') || '', saved: p.get('saved') || '' };
+  const filters = { q: p.get('q') || '', segment: p.get('segment') || '', category: p.get('category') || '', hq: p.get('hq') || '', saved: p.get('saved') || '', sort: p.get('sort') || '' };
   const update = () => {
     const qs = new URLSearchParams(Object.entries(filters).filter(([, v]) => v)).toString();
     history.replaceState(null, '', '#/' + (qs ? '?' + qs : ''));
@@ -181,6 +209,17 @@ async function jobsPage() {
     update();
   }));
   f.category.addEventListener('change', () => { filters.category = f.category.value; update(); });
+  f.sort.value = filters.sort;
+  f.sort.addEventListener('change', () => { filters.sort = f.sort.value; update(); });
+  // Role tiles set the same category filter as the menu; tapping the active one clears it
+  $('#roles').addEventListener('click', e => {
+    const b = e.target.closest('[data-role]');
+    if (!b) return;
+    filters.category = filters.category === b.dataset.role ? '' : b.dataset.role;
+    f.category.value = filters.category;
+    $('#roles').querySelectorAll('[data-role]').forEach(x => x.setAttribute('aria-pressed', x.dataset.role === filters.category));
+    update();
+  });
   $('#hqIndia').addEventListener('click', e => {
     filters.hq = filters.hq ? '' : 'India';
     e.currentTarget.setAttribute('aria-pressed', Boolean(filters.hq));
@@ -229,7 +268,17 @@ async function loadJobs(filters, first = false) {
     ${data.pending ? `<span>${data.pending} more job${data.pending === 1 ? '' : 's'} not posted yet: we don't have proper details about ${data.pending === 1 ? 'that company' : 'those companies'}</span>` : ''}`;
   countUp($('#status'));
   const saved = savedJobs();
-  const shown = filters.saved ? data.jobs.filter(j => saved.has(j.id)) : data.jobs;
+  const shown = filters.saved ? data.jobs.filter(j => saved.has(j.id)) : [...data.jobs];
+  if (filters.sort === 'score') shown.sort((a, b) => b.trust_score - a.trust_score);
+  if (filters.sort === 'pay') shown.sort((a, b) => (b.salary_max || 0) - (a.salary_max || 0));
+  // Browse by role: the biggest categories, counted once from the first list
+  if (first) {
+    const counts = {};
+    data.jobs.forEach(j => j.category && (counts[j.category] = (counts[j.category] || 0) + 1));
+    const top = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 8);
+    $('#roles').hidden = top.length < 3;
+    $('#roles').innerHTML = top.map(([c, n]) => `<button type="button" class="role" data-role="${esc(c)}" aria-pressed="${filters.category === c}">${roleIcon(c)}<span><b>${esc(c)}</b><small>${n} job${n === 1 ? '' : 's'}</small></span></button>`).join('');
+  }
   $('#count').textContent = `${shown.length} shown`;
   $('#jobList').removeAttribute('aria-busy');
   $('#jobList').innerHTML = shown.length ? shown.map((j, i) => jobCard(j, saved, i)).join('')
@@ -334,7 +383,26 @@ function applyControl(d) {
   return `<a class="btn primary" id="apply" data-go href="${goHref(j.id)}" target="_blank" rel="noopener">${label}</a>`;
 }
 
+// What working on this job from India looks like, from what the posting says
+function remoteGlance(j) {
+  const tz = timeZone(j.location);
+  return `<dl class="facts">
+    <div><dt>Work from</dt><dd>${remoteWhere(j.location).replace('Remote · ', '')}</dd></div>
+    <div><dt>Work type</dt><dd>${workType(j) || 'See posting'}</dd></div>
+    <div><dt>Time zone</dt><dd>${tz || 'Ask the employer'}</dd></div>
+    <div><dt>Pay a month</dt><dd>${j.salary_min && state.fx ? `${perMonth(j.salary_min)} – ${perMonth(j.salary_max)}` : 'Not listed'}</dd></div></dl>
+    ${isAsync(j) ? '<p class="hint" style="margin-top:10px">This team works async, so set hours matter less.</p>' : ''}
+    <h3 class="sub">Before you apply</h3>
+    <ul class="ready">
+      <li>Steady internet and a quiet place for video calls</li>
+      <li>A way to receive money from abroad: your bank's foreign transfer, or a service like Payoneer or Wise</li>
+      <li>Ask for a written offer letter or contract before you start</li>
+      <li>Never pay for training, equipment or a "joining fee"</li>
+    </ul>`;
+}
+
 async function jobPage(id) {
+  if (!state.fx) state.fx = (await api('/api/pricing').catch(() => ({}))).fx_rate;
   const d = await api('/api/jobs/' + id), j = d.job;
   $app.innerHTML = `
     <div class="card" style="margin-bottom:24px">
@@ -361,7 +429,10 @@ async function jobPage(id) {
           <div id="scamNote" hidden style="margin-top:12px" class="field"><label for="scamText">What happened? For example, they asked for a fee.</label>
             <textarea id="scamText" style="min-height:80px"></textarea><div><button type="button" class="btn primary sm" id="scamSend">Send report</button></div></div></div>` : ''}
       </div>
-      <div class="card"><h2>Company background check</h2>${reportHtml(d.company, d.report, d.unlocked)}</div>
+      <div class="stack">
+        <div class="card"><h2>Remote work at a glance</h2>${remoteGlance(j)}</div>
+        <div class="card"><h2>Company background check</h2>${reportHtml(d.company, d.report, d.unlocked)}</div>
+      </div>
     </div>`;
 
   // The link itself opens the employer's page in a new tab; here we only refresh the counts.
@@ -747,7 +818,15 @@ function countUp(root) {
 }
 
 // Header gets a soft shadow once the page scrolls
-addEventListener('scroll', () => document.querySelector('header.bar').classList.toggle('scrolled', scrollY > 8), { passive: true });
+// and a "back to top" button appears once you're well down the list
+const toTop = Object.assign(document.createElement('button'), { type: 'button', className: 'to-top', hidden: true, title: 'Back to top',
+  innerHTML: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg><span class="sr-only">Back to top</span>' });
+toTop.addEventListener('click', () => scrollTo({ top: 0, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }));
+document.body.append(toTop);
+addEventListener('scroll', () => {
+  document.querySelector('header.bar').classList.toggle('scrolled', scrollY > 8);
+  toTop.hidden = scrollY < 900;
+}, { passive: true });
 
 window.addEventListener('hashchange', route);
 loadMe().then(route);
