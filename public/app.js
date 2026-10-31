@@ -77,10 +77,10 @@ const skeletonCard = () => `<article class="job is-skeleton" aria-hidden="true">
     <div class="tags"><span class="sk sk-pill"></span><span class="sk sk-pill"></span><span class="sk sk-pill"></span></div>
     <div class="job-foot"><span class="sk sk-line"></span><span class="sk sk-button"></span></div></article>`;
 
-function jobCard(j, saved) {
+function jobCard(j, saved, i = 0) {
   const isSaved = saved.has(j.id);
   const skills = String(j.tags || '').split(',').map(s => s.trim()).filter(Boolean).slice(0, 3);
-  return `<article class="job">
+  return `<article class="job" style="--i:${Math.min(i, 10)}">
     <div class="job-head">
       <span class="avatar" style="--h:${hueOf(j.company_name)}" aria-hidden="true">${esc(initials(j.company_name))}</span>
       <div class="job-title-group">
@@ -166,7 +166,8 @@ async function jobsPage() {
     now ? saved.add(id) : saved.delete(id);
     setSaved(saved);
     const title = b.closest('.job').querySelector('h2').textContent;
-    b.setAttribute('aria-pressed', now); b.title = now ? 'Saved' : 'Save job';
+    b.setAttribute('aria-pressed', now); b.classList.remove('pop'); void b.offsetWidth; if (now) b.classList.add('pop');
+    b.title = now ? 'Saved' : 'Save job';
     b.setAttribute('aria-label', `${now ? 'Remove from saved jobs' : 'Save job'}: ${title}`);
     toast(now ? 'Saved. Find it under the Saved filter.' : 'Removed from saved jobs.');
     if (filters.saved && !now) loadJobs(filters);
@@ -189,15 +190,16 @@ async function loadJobs(filters, first = false) {
   if (first) { sel.innerHTML += data.categories.map(c => `<option>${esc(c)}</option>`).join(''); sel.value = filters.category; }
   // Only green (score 70+) jobs are called verified; the rest passed the scam checks but need a closer look
   const verified = data.jobs.filter(j => j.trust_level === 'verified').length;
-  $('#status').innerHTML = `<span><i class="dot" aria-hidden="true"></i><b>${data.jobs.length} checked job${data.jobs.length === 1 ? '' : 's'}</b> from <b>${data.companies} compan${data.companies === 1 ? 'y' : 'ies'}</b></span>
-    <span><b>${verified}</b> verified · <b>${data.jobs.length - verified}</b> to check carefully</span>
+  $('#status').innerHTML = `<span><i class="dot" aria-hidden="true"></i><b><span data-count="${data.jobs.length}">${data.jobs.length}</span> checked job${data.jobs.length === 1 ? '' : 's'}</b> from <b><span data-count="${data.companies}">${data.companies}</span> compan${data.companies === 1 ? 'y' : 'ies'}</b></span>
+    <span><b data-count="${verified}">${verified}</b> verified · <b>${data.jobs.length - verified}</b> to check carefully</span>
     <span>${data.last_refresh ? `Last refreshed ${esc(ago(data.last_refresh))}` : 'Refreshed every 6 hours'} · jobs scoring under ${data.min_score ?? 50} are not posted</span>
     ${data.pending ? `<span>${data.pending} more job${data.pending === 1 ? '' : 's'} not posted yet: we don't have proper details about ${data.pending === 1 ? 'that company' : 'those companies'}</span>` : ''}`;
+  countUp($('#status'));
   const saved = savedJobs();
   const shown = filters.saved ? data.jobs.filter(j => saved.has(j.id)) : data.jobs;
   $('#count').textContent = `${shown.length} shown`;
   $('#jobList').removeAttribute('aria-busy');
-  $('#jobList').innerHTML = shown.length ? shown.map(j => jobCard(j, saved)).join('')
+  $('#jobList').innerHTML = shown.length ? shown.map((j, i) => jobCard(j, saved, i)).join('')
     : filters.saved ? `<div class="empty"><b>No saved jobs yet</b>Tap the bookmark on a job to save it here.</div>`
     : `<div class="empty"><b>No verified jobs match that search</b>Try another skill, company or plan.</div>`;
   const b = $('#blocked');
@@ -692,12 +694,27 @@ async function route() {
   } catch (e) { $app.innerHTML = `<div class="notice bad" role="alert">${esc(e.message)}</div>`; }
   const h = $app.querySelector('h1');
   document.title = (h && page ? h.textContent.trim() + ' · ' : '') + 'Parakh – Verified remote jobs for India';
+  // Fade each new page in
+  $app.classList.remove('enter'); void $app.offsetWidth; $app.classList.add('enter');
   if (route.ran) { $app.focus({ preventScroll: true }); scrollTo(0, 0); }
   route.ran = true;
 }
 
 // "Skip to content" moves focus without changing the page address (the address holds the current page).
 document.querySelector('.skip-link').addEventListener('click', e => { e.preventDefault(); $app.focus(); });
+
+// Count numbers up from zero when they appear (skipped for people who turn motion off)
+function countUp(root) {
+  if (!root || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  root.querySelectorAll('[data-count]').forEach(el => {
+    const end = Number(el.dataset.count), t0 = performance.now(), ms = 700;
+    const step = t => { const k = Math.min(1, (t - t0) / ms); el.textContent = Math.round(end * (1 - (1 - k) ** 3)); if (k < 1) requestAnimationFrame(step); };
+    requestAnimationFrame(step);
+  });
+}
+
+// Header gets a soft shadow once the page scrolls
+addEventListener('scroll', () => document.querySelector('header.bar').classList.toggle('scrolled', scrollY > 8), { passive: true });
 
 window.addEventListener('hashchange', route);
 loadMe().then(route);
