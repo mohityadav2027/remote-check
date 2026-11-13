@@ -10,10 +10,12 @@ const bcrypt = require('bcryptjs');
 const db = require('./lib/db');
 const seed = require('./lib/seed');
 const { SEGMENTS, PLAN_DAYS, priceList, classifySegment, planCovers } = require('./lib/pricing');
-const { MIN_SCORE, scoreCompany, listingStatus, missingInfo, refreshDomainAge, domainCreated, hostOf, registrableDomain, textChecks, RED_FLAGS, parseRegistration } = require('./lib/verify');
+const { MIN_SCORE, scoreCompany, listingStatus, checkLive, missingInfo, refreshDomainAge, domainCreated, hostOf, registrableDomain, textChecks, RED_FLAGS, parseRegistration } = require('./lib/verify');
 const payments = require('./lib/payments');
 const { runImport } = require('./lib/importer');
 const { BOARDS, parseCareersUrl } = require('./lib/sources');
+const { suggestCompanies, companyProfile, profileChecks } = require('./lib/profile');
+const { norm } = require('./lib/enrich');
 
 // The site only lists real jobs imported from job websites. Fictional sample data loads only when
 // SEED_SAMPLE=true is set explicitly, for automated testing on a throwaway database.
@@ -27,6 +29,8 @@ app.use(session({
 }));
 if (process.env.NODE_ENV === 'production') app.set('trust proxy', 1);
 app.use(express.static(path.join(__dirname, 'public')));
+// The company profile code also runs in the browser, as a fallback when Wikidata is busy for our server
+app.get('/js/profile.js', (req, res) => res.type('application/javascript').sendFile(path.join(__dirname, 'lib', 'profile.js')));
 
 // ---------- helpers ----------
 const ah = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
@@ -183,6 +187,13 @@ app.get('/api/jobs/:id', ah(async (req, res) => {
   if (!job) return res.status(404).json({ error: 'Job not found' });
   let company = db.prepare('SELECT * FROM companies WHERE id=?').get(job.company_id);
   company = await refreshDomainAge(company);
+  // Open the original posting (at most every 6 hours per job). A job taken down there comes down here too.
+  if (job.status === 'open' && (!job.live_checked_at || Date.now() - Date.parse(job.live_checked_at + 'Z') > 6 * 3600e3)) {
+    job.live_state = await checkLive(job.apply_url);
+    db.prepare(`UPDATE jobs SET live_state = ?, live_checked_at = datetime('now') WHERE id = ?`).run(job.live_state, job.id);
+    if (job.live_state === 'closed') { db.prepare(`UPDATE jobs SET status = 'closed', closed_at = datetime('now') WHERE id = ?`).run(job.id); job.status = 'closed'; }
+  }
+  if (job.status === 'closed') return res.status(410).json({ code: 'CLOSED', error: `"${job.title}" has been closed or filled on the employer's site, so we've taken it down.` });
   const ls = listingStatus(company, job);
   if (ls.status !== 'listed') return res.status(410).json(notPosted(job, company, ls));
   const { report, jobCheck } = ls;
@@ -293,6 +304,49 @@ function scanLimited(ip) {
   const now = Date.now(), recent = (scanHits.get(ip) || []).filter(t => now - t < 60e3);
   recent.push(now); scanHits.set(ip, recent);
   return recent.length > 20;
+}
+
+// ---------- Company check: type any company's name, see everything public about it ----------
+// Results come from Wikidata and Wikipedia and are kept for a while, so repeated lookups are fast.
+async function cached(key, days, fn) {
+  const row = db.prepare(`SELECT json FROM lookup_cache WHERE key = ? AND fetched_at > datetime('now', ?)`).get(key, `-${days} days`);
+  if (row) return JSON.parse(row.json);
+  const value = await fn();
+  db.prepare(`INSERT INTO lookup_cache (key, json) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET json = excluded.json, fetched_at = datetime('now')`).run(key, JSON.stringify(value));
+  return value;
+}
+app.get('/api/lookup/suggest', ah(async (req, res) => {
+  const q = String(req.query.q || '').trim().slice(0, 80);
+  if (q.length < 2) return res.json({ results: [] });
+  try { res.json({ results: await cached('suggest:' + q.toLowerCase(), 7, () => suggestCompanies(q)) }); }
+  catch { res.status(503).json({ code: 'BUSY', error: 'Company search is busy. Try again in a moment.' }); }
+}));
+app.get('/api/lookup/:qid', ah(async (req, res) => {
+  const qid = String(req.params.qid);
+  if (!/^Q\d{1,12}$/.test(qid)) return res.status(400).json({ error: 'Pick a company from the list.' });
+  let profile;
+  try { profile = await cached('profile:' + qid, 7, () => companyProfile(qid)); }
+  catch (e) { return res.status(/not found/i.test(e.message) ? 404 : 503).json(/not found/i.test(e.message) ? { error: 'Company not found.' } : { code: 'BUSY', error: 'Company records are busy. Try again in a moment.' }); }
+  const created = profile.website ? await cached('domain:' + registrableDomain(hostOf(profile.website)), 30, () => domainCreated(profile.website)) : null;
+  res.json({ profile, domain_created: created, checks: profileChecks(profile, { domainCreated: created }), on_site: onSiteFor(qid, profile.name, profile.also_known_as) });
+}));
+// Parakh's own data for a company looked up in the browser (the fallback above)
+app.post('/api/lookup/site', (req, res) => {
+  const { qid = '', name = '', aka = [] } = req.body || {};
+  res.json({ on_site: onSiteFor(String(qid), String(name).slice(0, 200), [].concat(aka).slice(0, 10).map(String)) });
+});
+// The same company on Parakh: its posted jobs and its trust score
+function onSiteFor(qid, name, aka) {
+  const ours = (qid && db.prepare('SELECT * FROM companies WHERE wikidata_id = ?').get(qid))
+    || db.prepare('SELECT * FROM companies').all().find(c => norm(c.name) === norm(name) || aka.some(a => norm(a) === norm(c.name)));
+  let onSite = null;
+  if (ours) {
+    const report = scoreCompany(ours);
+    const jobs = db.prepare(`SELECT * FROM jobs WHERE company_id = ? AND status = 'open'`).all(ours.id)
+      .filter(j => listingStatus(ours, j, report).status === 'listed').map(j => ({ id: j.id, title: j.title, location: j.location, posted_at: j.posted_at }));
+    onSite = { company_id: ours.id, score: report.score, level: report.level, jobs: jobs.slice(0, 12), open: jobs.length, cin: ours.cin || null };
+  }
+  return onSite;
 }
 
 app.post('/api/scan', ah(async (req, res) => {

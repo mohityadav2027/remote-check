@@ -260,3 +260,39 @@ test('brand check flags hiring "for" a big brand, not mentions of its tools', ()
   assert.equal(brand('Work at Google from home! Register at https://google-jobs-now.example'), true);
   assert.equal(brand('Amazon HR team: contact on Telegram. Mail hr.amazon@gmail.com'), true);
 });
+
+test('job post checks: description detail, apply page owner, and live posting', async () => {
+  const { checkJob, checkLive, atsBoard } = require('../lib/verify');
+  const company = { name: 'Razorpay Software Pvt Ltd', website: 'https://razorpay.com' };
+  const long = 'What you will do: build payment APIs and work with product teams every day. Requirements: 3 years of experience with Node.js and SQL. '
+    + 'Benefits: fully remote, health insurance, paid time off and a home office budget. '.repeat(2);
+  const good = checkJob(company, { title: 'Backend Engineer', description: long, apply_url: 'https://jobs.lever.co/razorpay/abc-123' });
+  assert.ok(good.passed.some(p => p.label === 'Detailed job description'));
+  assert.ok(good.passed.some(p => p.label.startsWith('Apply page belongs to')));
+  const other = checkJob(company, { title: 'Backend Engineer', description: 'Build APIs. Remote.', apply_url: 'https://jobs.lever.co/someoneelse/abc' });
+  assert.ok(other.problems.some(p => p.label === 'Apply page is under a different company name' && p.level === 'warn'));
+  assert.ok(other.problems.some(p => p.label === 'Very short job description'));
+  assert.ok(other.ok, 'warnings alone do not take a job down');
+  assert.equal(atsBoard('https://boards.greenhouse.io/gitlab/jobs/1'), 'gitlab');
+  assert.equal(atsBoard('https://remotive.com/remote-jobs/x/1'), null);
+
+  const real = global.fetch;
+  const reply = (status, url) => async () => ({ ok: status < 400, status, url });
+  global.fetch = reply(404); assert.equal(await checkLive('https://remotive.com/remote-jobs/x/1'), 'closed');
+  global.fetch = reply(200, 'https://job-boards.greenhouse.io/gitlab?error=true'); assert.equal(await checkLive('https://boards.greenhouse.io/gitlab/jobs/1'), 'closed');
+  global.fetch = reply(200, 'https://jobs.lever.co/acme'); assert.equal(await checkLive('https://jobs.lever.co/acme/abc'), 'closed');
+  global.fetch = reply(200, 'https://jobs.lever.co/acme/abc'); assert.equal(await checkLive('https://jobs.lever.co/acme/abc'), 'open');
+  global.fetch = reply(403); assert.equal(await checkLive('https://remoteok.com/x'), 'unknown');
+  global.fetch = async () => { throw new Error('offline'); }; assert.equal(await checkLive('https://remoteok.com/x'), 'unknown');
+  global.fetch = real;
+});
+
+test('company profile from Wikidata: details and what they tell a job seeker', () => {
+  const { profileChecks } = require('../lib/profile');
+  const p = { name: 'Acme', founded: { year: 2001 }, closed: null, employees: { n: 1200, year: 2025 }, website: 'https://acme.com', wikipedia: 'https://en.wikipedia.org/wiki/Acme',
+    linkedin: 'https://www.linkedin.com/company/acme', stock: { exchange: 'NSE', ticker: 'ACME' }, founders: ['A. Founder'], ceo: 'B. Boss' };
+  const checks = profileChecks(p, { domainCreated: '1999-04-01', now: new Date('2026-11-01') });
+  assert.ok(checks.every(c => c.level === 'ok'), JSON.stringify(checks));
+  const closed = profileChecks({ ...p, closed: { year: 2019 } });
+  assert.equal(closed[0].level, 'bad');
+});

@@ -86,7 +86,7 @@ async function loadMe() { Object.assign(state, await api('/api/me')); }
 function renderNav(page) {
   const u = state.user;
   const link = (href, label, key) => `<a href="${href}"${page === key ? ' aria-current="page"' : ''}>${label}</a>`;
-  $('#nav').innerHTML = link('#/', 'Jobs', 'jobs') + link('#/scan', 'Scan a job', 'scan') + link('#/pricing', 'Pricing', 'pricing') +
+  $('#nav').innerHTML = link('#/', 'Jobs', 'jobs') + link('#/check', 'Company check', 'check') + link('#/scan', 'Scan a job', 'scan') + link('#/pricing', 'Pricing', 'pricing') +
     (u ? (u.is_admin ? link('#/admin', 'Admin', 'admin') : '') + link('#/profile', 'My profile', 'profile') + '<button type="button" id="logout">Log out</button>'
        : link('#/login', 'Log in', 'login') + '<a href="#/signup" class="btn primary sm">Sign up</a>');
   $('#logout')?.addEventListener('click', async () => { await api('/api/logout', { method: 'POST' }); await loadMe(); location.hash = '#/'; toast('Logged out.'); });
@@ -342,6 +342,7 @@ function reportHtml(c, r, unlocked) {
     ${'ats_type' in c ? `<div><dt>Hiring system</dt><dd>${c.ats_type ? `${ATS[c.ats_type]} careers page` : 'Job boards'}</dd></div>` : ''}
     <div><dt>Headquarters</dt><dd>${c.hq_country ? `${c.hq_city ? esc(c.hq_city) + ', ' : ''}${esc(c.hq_country)}` : 'Not public'}</dd></div>
     <div><dt>${/^india$/i.test(c.hq_country || '') || c.cin ? 'Indian registration (CIN)' : 'Registration'}</dt><dd>${c.cin ? esc(c.cin) : /^india$/i.test(c.hq_country || '') ? 'Not on record' : 'Outside India'}</dd></div></dl>
+    ${c.wikidata_id ? `<p style="margin-top:10px"><a class="btn sm" href="#/check/${esc(c.wikidata_id)}">Full company profile</a></p>` : ''}
     ${c.info_source ? `<p class="hint">Company details from ${c.info_source === 'wikidata' ? `<a href="https://www.wikidata.org/wiki/${esc(c.wikidata_id)}" target="_blank" rel="noopener">Wikidata</a>, the public database behind Wikipedia` : 'our team'}.</p>` : ''}`;
   const checks = `<ul class="checks">${r.signals.map(x => `<li>${stIcon(x.impact > 0 ? 'ok' : x.impact <= -8 ? 'bad' : x.impact < 0 ? 'warn' : 'n')}
     <span>${esc(x.label)}</span><span class="val">${x.impact > 0 ? '+' : ''}${x.impact}</span>${x.detail ? `<span class="det">${esc(x.detail)}</span>` : ''}</li>`).join('')}</ul>`;
@@ -582,6 +583,147 @@ async function jobPage(id) {
 
 // ---------- scan a job ----------
 const SAMPLE_SCAM = 'Hiring for Amazon work-from-home data entry. Earn ₹4,000 per day, no experience needed. Limited seats! Pay ₹1,499 one-time registration fee for your training kit. Contact HR Priya on Telegram @amazon_jobs_hr or email amazonhiring.india@gmail.com';
+// ---------- Company check: any company, everything public about it ----------
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const fullDate = d => d ? `${d.day && d.month ? d.day + ' ' : ''}${d.month ? MONTHS[d.month - 1] + ' ' : ''}${d.year}` : null;
+const bigNum = n => n >= 1e7 ? `${(n / 1e7).toFixed(1).replace(/\.0$/, '')} crore` : n >= 1e5 ? `${(n / 1e5).toFixed(1).replace(/\.0$/, '')} lakh` : Number(n).toLocaleString('en-IN');
+const money = r => r && r.currency ? `${r.currency} ${r.amount >= 1e9 ? (r.amount / 1e9).toFixed(1) + ' billion' : r.amount >= 1e6 ? (r.amount / 1e6).toFixed(1) + ' million' : r.amount.toLocaleString('en-IN')}${r.year ? ` (${r.year})` : ''}` : null;
+
+// Company lookups go through our server (cached). If Wikidata is busy for the server, the browser asks Wikidata itself.
+let profileLib;
+const loadProfileLib = () => profileLib ??= new Promise((ok, no) => {
+  const sc = Object.assign(document.createElement('script'), { src: '/js/profile.js' });
+  sc.onload = () => ok(window.ParakhProfile);
+  sc.onerror = () => { profileLib = null; no(new Error('Company records are busy. Try again in a moment.')); };
+  document.head.append(sc);
+});
+const isBusy = e => e.data?.code === 'BUSY';
+async function lookupSuggest(q) {
+  try { return (await api('/api/lookup/suggest?q=' + encodeURIComponent(q))).results; }
+  catch (e) { if (!isBusy(e)) throw e; return (await loadProfileLib()).suggestCompanies(q); }
+}
+async function lookupProfile(qid) {
+  try { return await api('/api/lookup/' + encodeURIComponent(qid)); }
+  catch (e) {
+    if (!isBusy(e)) throw e;
+    const L = await loadProfileLib(), profile = await L.companyProfile(qid);
+    const { on_site } = await api('/api/lookup/site', { method: 'POST', body: { qid, name: profile.name, aka: profile.also_known_as } }).catch(() => ({ on_site: null }));
+    return { profile, domain_created: null, checks: L.profileChecks(profile), on_site };
+  }
+}
+
+async function checkPage(qid) {
+  $app.innerHTML = `
+    <section class="check-hero">
+      <p class="eyebrow">Company check</p>
+      <h1>Look up any company before you apply</h1>
+      <p class="lede">Type a company's name to see when it was founded, who started and runs it, where it's based, how many people work there and whether it's still operating. From public records.</p>
+      <div class="lookup" id="lookup">
+        <label for="coQ" class="sr-only">Company name</label>
+        <input id="coQ" type="search" autocomplete="off" placeholder="Company name, e.g. Infosys, Razorpay, GitLab" role="combobox" aria-expanded="false" aria-controls="coList" aria-autocomplete="list">
+        <ul class="suggest" id="coList" role="listbox" hidden></ul>
+      </div>
+      <div class="chips try">${['Infosys', 'Razorpay', 'Zoho', 'GitLab', 'Wipro', 'Freshworks'].map(n => `<button type="button" class="chip" data-try="${n}">${n}</button>`).join('')}</div>
+    </section>
+    <div id="coResult"></div>`;
+
+  const input = $('#coQ'), list = $('#coList');
+  let items = [], active = -1, timer, seq = 0;
+  const close = () => { list.hidden = true; input.setAttribute('aria-expanded', 'false'); active = -1; };
+  const paint = () => {
+    list.innerHTML = items.length ? items.map((x, i) => `<li role="option" id="co-${x.id}" aria-selected="${i === active}" data-qid="${x.id}"><b>${esc(x.name)}</b><span>${esc(x.description || 'No description')}</span></li>`).join('')
+      : '<li class="none">No company with that name in public records</li>';
+    list.hidden = false; input.setAttribute('aria-expanded', 'true');
+    input.setAttribute('aria-activedescendant', active >= 0 ? `co-${items[active].id}` : '');
+  };
+  const search = async q => {
+    const mine = ++seq;
+    if (q.trim().length < 2) { items = []; close(); return; }
+    list.innerHTML = '<li class="none">Searching…</li>'; list.hidden = false;
+    try { const r = await lookupSuggest(q); if (mine !== seq) return; items = r; active = items.length ? 0 : -1; paint(); }
+    catch (e) { if (mine === seq) { list.innerHTML = `<li class="none">${esc(e.message)}</li>`; } }
+  };
+  const pick = x => { close(); input.value = x.name; location.hash = '#/check/' + x.id; };
+  input.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(() => search(input.value), 250); });
+  input.addEventListener('keydown', e => {
+    if (e.key === 'ArrowDown' && items.length) { e.preventDefault(); active = (active + 1) % items.length; paint(); }
+    else if (e.key === 'ArrowUp' && items.length) { e.preventDefault(); active = (active - 1 + items.length) % items.length; paint(); }
+    else if (e.key === 'Enter' && items[active]) { e.preventDefault(); pick(items[active]); }
+    else if (e.key === 'Escape') close();
+  });
+  list.addEventListener('mousedown', e => { const li = e.target.closest('[data-qid]'); if (li) { e.preventDefault(); pick(items.find(x => x.id === li.dataset.qid)); } });
+  input.addEventListener('blur', () => setTimeout(close, 150));
+  $app.querySelectorAll('[data-try]').forEach(b => b.addEventListener('click', () => { input.value = b.dataset.try; input.focus(); search(b.dataset.try); }));
+
+  if (!qid) { input.focus(); return; }
+  const out = $('#coResult');
+  out.innerHTML = `<div class="card"><p class="hint">Looking up public records…</p></div>`;
+  let d;
+  try { d = await lookupProfile(qid); }
+  catch (e) { out.innerHTML = `<div class="notice bad" role="alert">${esc(e.message)}</div>`; return; }
+  const p = d.profile, year = new Date().getFullYear();
+  input.value = p.name;
+  document.title = `${p.name} · Company check · Parakh`;
+  const bad = d.checks.some(c => c.level === 'bad'), oks = d.checks.filter(c => c.level === 'ok').length;
+  const verdict = bad ? ['bad', 'Closed company'] : oks >= 5 ? ['ok', 'Well documented'] : oks >= 3 ? ['warn', 'Some public records'] : ['warn', 'Few public records'];
+  const domain = p.website ? domainOf(p.website) : null;
+  const link = (href, label) => href ? `<a class="btn sm" href="${esc(href)}" target="_blank" rel="noopener">${label} ↗</a>` : '';
+  const fact = (k, v) => v ? `<div><dt>${k}</dt><dd>${v}</dd></div>` : '';
+  out.innerHTML = `
+    <section class="job-hero co-hero" style="--h:${hueOf(p.name)}">
+      <div class="job-hero-top">
+        ${p.logo ? `<span class="avatar xl logo"><img src="${esc(p.logo)}" alt="" loading="lazy" onerror="this.parentNode.textContent='${esc(initials(p.name)).replace(/'/g, '')}'"></span>`
+          : `<span class="avatar xl" style="--h:${hueOf(p.name)}" aria-hidden="true">${esc(initials(p.name))}</span>`}
+        <div class="job-hero-main">
+          <p class="eyebrow">${[p.country, p.industry[0]].filter(Boolean).map(esc).join(' · ') || 'Company'}</p>
+          <h1>${esc(p.name)}</h1>
+          <p class="co">${p.description ? `<span>${esc(p.description)}</span>` : ''}${p.official_name && p.official_name !== p.name ? `<span>Registered as ${esc(p.official_name)}</span>` : ''}</p>
+        </div>
+        <div class="job-hero-score"><span class="pill ${verdict[0]}">${verdict[1]}</span></div>
+      </div>
+      <div class="acts">${link(p.website, domain || 'Website')}${link(p.linkedin, 'LinkedIn')}${link(p.twitter, 'X')}${link(p.wikipedia, 'Wikipedia')}
+        ${/india/i.test(p.country || '') ? link('https://www.mca.gov.in/content/mca/global/en/mca/master-data/MDS.html', 'Check registration on MCA') : ''}</div>
+    </section>
+    <section class="snapshot" aria-label="Company at a glance">
+      ${snap(SNAP.founded, 'Founded', p.founded ? fullDate(p.founded) : 'Not public', p.founded ? (p.closed ? `closed ${p.closed.year}` : `${year - p.founded.year} years in business`) : '')}
+      ${snap(SNAP.team, 'Employees', p.employees ? bigNum(p.employees.n) : 'Not public', p.employees?.year ? `as of ${p.employees.year}` : '')}
+      ${snap(SNAP.hq, 'Headquarters', esc(p.headquarters || p.country || 'Not public'), p.headquarters && p.country ? esc(p.country) : '')}
+      ${snap(SNAP.hiring, 'CEO', esc(p.ceo || 'Not public'), p.founders.length ? `${p.founders.length} founder${p.founders.length === 1 ? '' : 's'}` : '')}
+      ${snap(SNAP.web, 'Website', esc(domain || 'Not public'), d.domain_created ? `registered ${String(d.domain_created).slice(0, 4)}` : '')}
+    </section>
+    <div class="grid2">
+      <div class="stack">
+        <div class="card"><h2>About ${esc(p.name)}</h2>
+          ${p.about ? `<div class="desc-body"><p>${esc(p.about)}</p></div><p class="hint" style="margin-top:8px">From <a href="${esc(p.wikipedia)}" target="_blank" rel="noopener">Wikipedia</a>.</p>`
+            : `<p>${esc(p.description || 'No description in public records.')}</p><p class="hint" style="margin-top:8px">No Wikipedia article yet. Smaller and newer companies often don't have one, which isn't a warning sign on its own.</p>`}
+        </div>
+        <div class="card"><h2>Company details</h2><dl class="facts co-facts">
+          ${fact('Founded', p.founded && esc(fullDate(p.founded)))}${fact('Founders', p.founders.length && esc(p.founders.join(', ')))}
+          ${fact('CEO', p.ceo && esc(p.ceo))}${fact('Headquarters', [p.headquarters, p.country].filter(Boolean).map(esc).join(', '))}
+          ${fact('Industry', p.industry.length && esc(p.industry.join(', ')))}${fact('Employees', p.employees && `${bigNum(p.employees.n)}${p.employees.year ? ` (${p.employees.year})` : ''}`)}
+          ${fact('Stock listing', p.stock && esc([p.stock.exchange, p.stock.ticker].filter(Boolean).join(': ')))}${fact('Revenue', money(p.revenue) && esc(money(p.revenue)))}
+          ${fact('Parent company', p.parent && esc(p.parent))}${fact('Owned by', p.owners.length && esc(p.owners.join(', ')))}
+          ${fact('Legal form', p.legal_form && esc(p.legal_form))}${fact('Products', p.products.length && esc(p.products.join(', ')))}
+          ${fact('Also known as', p.also_known_as.length && esc(p.also_known_as.join(', ')))}${fact('Website registered', d.domain_created && esc(fmtDate(d.domain_created)))}
+          ${d.on_site?.cin ? fact('CIN', esc(d.on_site.cin)) : ''}
+        </dl></div>
+      </div>
+      <div class="stack">
+        <div class="card"><h2>What the records tell you</h2>
+          <ul class="checks">${d.checks.map(c => `<li>${stIcon(c.level)}<span>${esc(c.label)}</span><span></span>${c.detail ? `<span class="det">${esc(c.detail)}</span>` : ''}</li>`).join('')}</ul>
+          <p class="hint" style="margin-top:12px">Before you share documents, check the recruiter's email ends in ${domain ? `<b>@${esc(domain.replace(/^(about|careers|jobs)\./, ''))}</b>` : 'the company\'s own domain'} and that they work there on LinkedIn.</p></div>
+        <div class="card"><h2>Jobs on Parakh</h2>
+          ${d.on_site ? `<div style="display:flex;gap:14px;align-items:center;margin-bottom:12px">${seal(d.on_site.score, d.on_site.level, 56)}<div><b>Trust score ${d.on_site.score}</b><p class="hint">From our background check: hiring history, website age and job-seeker reports.</p></div></div>
+              ${d.on_site.jobs.length ? `<ul class="co-jobs">${d.on_site.jobs.map(j => `<li><a href="#/job/${j.id}">${esc(j.title)}</a><small>${remoteWhere(j.location)} · ${esc(ago(j.posted_at))}</small></li>`).join('')}</ul>`
+                : '<p class="hint">No open remote jobs from this company right now.</p>'}
+              <p style="margin-top:10px"><button type="button" class="linkbtn" data-company="${d.on_site.company_id}">See full background check</button></p>`
+            : '<p class="hint">No remote jobs from this company on Parakh yet. We add jobs every 10 hours.</p>'}
+        </div>
+      </div>
+    </div>
+    <p class="hint" style="margin-top:20px">From <a href="${esc(p.wikidata)}" target="_blank" rel="noopener">Wikidata</a> and Wikipedia, public records that anyone can correct. Confirm key facts on the company's own website.</p>`;
+}
+
 function scanPage() {
   $app.innerHTML = `
     <div class="sec-head"><div><h1>Scan a job post or recruiter message</h1>
@@ -914,6 +1056,7 @@ async function route() {
     else if (page === 'job') await jobPage(id);
     else if (page === 'company') await companyPage(id);
     else if (page === 'scan') scanPage();
+    else if (page === 'check') await checkPage(id);
     else if (page === 'pricing') await pricingPage();
     else if (page === 'login' || page === 'signup') authPage(page);
     else if (page === 'profile') await profilePage();

@@ -33,6 +33,14 @@ The score runs from 0 to 100: **Verified** is 70 or more, **Check carefully** is
 - Companies Wikidata doesn't have show under **Admin → Companies missing details**. Click **Fill in**, add the founding year and website, and their jobs are posted on the next page load.
 - Jobs from companies without details aren't shown. The jobs page counts them ("N more jobs not posted yet"), and their job page explains why.
 
+## Company check
+- **Company check** (top menu): type any company's name and pick it from the list to see its full public profile: founding date, founders, CEO, headquarters, employees, industry, stock listing, parent company, website age, LinkedIn, and a plain description from Wikipedia. It also shows the company's jobs on Parakh and its trust score.
+- Data comes from Wikidata and Wikipedia (free, no key). Results are cached for 7 days. If Wikidata is busy for the server, the visitor's browser looks the company up directly.
+
+## Job post checks
+- Every job page checks the post itself: scam signs, where the Apply link goes, whether the apply page belongs to the same company (a careers page named for another company is flagged), and whether the description is detailed (what you'll do, requirements, pay).
+- **Still open?** The server opens the original posting (at most every 6 hours per job, and up to `LIVE_CHECKS`=60 job-board postings per import). A posting that is gone (404, or the hiring system sends you back to its job list) is taken down here too.
+
 ## Indian companies
 - The jobs page has an **Indian companies** filter (companies whose HQ country is India).
 - Every real Indian company is registered with the Ministry of Corporate Affairs and has a **CIN** (or an **LLPIN** for an LLP). Add it on Admin → Add company (copy it from mca.gov.in). The background check reads it: listed or unlisted, state, year of incorporation, company type. A valid CIN raises the score. A malformed one is a strong scam sign. An Indian company with no CIN on record loses a few points.
