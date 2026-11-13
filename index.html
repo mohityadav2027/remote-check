@@ -369,6 +369,31 @@ table.admin th { font-size: 12px; text-transform: uppercase; letter-spacing: .08
 .burst i { position: absolute; width: 8px; height: 8px; border-radius: 2px; background: var(--c); animation: burst .9s cubic-bezier(.2,.8,.2,1) forwards; }
 @keyframes burst { from { transform: rotate(var(--a)) translateY(0) scale(1); opacity: 1; } to { transform: rotate(var(--a)) translateY(calc(-1 * var(--d))) rotate(180deg) scale(.4); opacity: 0; } }
 
+/* ---------- company check ---------- */
+.check-hero { padding-block: 12px 24px; max-width: 760px; }
+.check-hero h1 { font-size: clamp(28px, 4.2vw, 44px); line-height: 1.08; margin: 10px 0; font-stretch: 108%; }
+.check-hero .lede { color: var(--muted); font-size: 16.5px; }
+.lookup { position: relative; margin-top: 18px; }
+.lookup input { width: 100%; padding: 14px 16px 14px 46px; font-size: 17px; border: 1.5px solid var(--line); border-radius: 12px; background: var(--surface)
+  url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23566880' stroke-width='2.2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='M20 20l-3.5-3.5'/%3E%3C/svg%3E") 15px center / 20px no-repeat;
+  box-shadow: var(--shadow); transition: border-color .15s; }
+.lookup input:focus { border-color: var(--accent); outline: none; }
+.suggest { position: absolute; z-index: 25; left: 0; right: 0; top: calc(100% + 6px); list-style: none; margin: 0; padding: 6px; background: var(--surface); border: 1px solid var(--line);
+  border-radius: 12px; box-shadow: var(--shadow); max-height: 360px; overflow-y: auto; animation: rise .18s both; }
+.suggest li { display: grid; gap: 2px; padding: 9px 12px; border-radius: 8px; cursor: pointer; }
+.suggest li span { font-size: 13px; color: var(--muted); }
+.suggest li[aria-selected="true"], .suggest li[data-qid]:hover { background: var(--accent-soft); }
+.suggest li.none { color: var(--muted); cursor: default; font-size: 14px; }
+.chips.try { margin-top: 12px; }
+.avatar.logo { background: #fff; border: 1px solid var(--line); padding: 8px; color: var(--ink); }
+.avatar.logo img { width: 100%; height: 100%; object-fit: contain; }
+.co-hero .acts { gap: 8px; }
+.co-facts dd { font: 600 14.5px/1.45 var(--f-body); }
+.co-facts div:last-child:nth-child(odd) { grid-column: 1 / -1; }
+.co-jobs { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.co-jobs li { display: grid; padding: 8px 0; border-top: 1px dashed var(--line); } .co-jobs li:first-child { border-top: 0; }
+.co-jobs small { color: var(--muted); }
+
 /* ---------- motion ---------- */
 @keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
 @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
@@ -850,9 +875,214 @@ if (typeof module !== 'undefined') module.exports = { lookupCompany, detailsFrom
 
 return { lookupCompany };
 })();
+function checkJob(company, job) {
+  const passed = [], problems = [];
+  const flags = textChecks(`${job.title}\n${job.description || ''}`, company.website);
+  for (const f of flags) problems.push({ label: f.label, detail: f.why, level: f.level });
+  if (!flags.length) passed.push({ label: 'No scam signs in the job post', detail: 'No fees, chat-app recruiters, personal emails or too-good-to-be-true pay' });
+  const applyHost = hostOf(job.apply_url || '');
+  const companyDomain = registrableDomain(hostOf(company.website || ''));
+  if (applyHost && (TRUSTED_APPLY_HOSTS.test(applyHost) || (companyDomain && applyHost.endsWith(companyDomain))))
+    passed.push({ label: `Apply link goes to ${applyHost}`, detail: 'A known job board, hiring system or the company\'s own site' });
+  else problems.push({ label: `Apply link goes to an unknown site (${applyHost || 'invalid'})`, detail: 'Genuine jobs apply through a known job board or the company\'s own site', level: 'bad' });
+  // Does the apply page belong to this company? Hiring-system pages carry the company's own page name
+  // (jobs.lever.co/razorpay); a different name there means the post may be copied from another employer.
+  const board = atsBoard(job.apply_url);
+  const compact = s => String(s || '').toLowerCase().replace(/\(.*?\)/g, '').replace(/\b(inc|llc|ltd|limited|pvt|private|gmbh|corp|corporation|co|technologies|labs|software|solutions|group)\b/g, '').replace(/[^a-z0-9]/g, '');
+  const name = compact(company.name), slug = compact(board);
+  if (companyDomain && applyHost && applyHost.endsWith(companyDomain))
+    passed.push({ label: 'Apply page is on the company\'s own website', detail: 'The posting comes straight from the employer' });
+  else if (board && name.length >= 3 && slug.length >= 3) {
+    if (slug.includes(name) || name.includes(slug)) passed.push({ label: `Apply page belongs to ${company.name}`, detail: 'The employer\'s own careers page on its hiring system' });
+    else problems.push({ label: 'Apply page is under a different company name', detail: 'The careers page is named for another company. Check the job on the employer\'s own website before applying.', level: 'warn' });
+  }
+
+  // Is the description detailed enough to be a real job? Real posts explain the work, the requirements and often the pay.
+  const desc = String(job.description || '');
+  const words = desc.split(/\s+/).filter(Boolean).length;
+  const parts = [/responsibilit|what you('|’)?ll do|what you will do|your role|the role|day.to.day/i.test(desc) && 'what you\'ll do',
+    /requirement|qualification|you have|you bring|experience (with|in)|years of experience|skills/i.test(desc) && 'requirements',
+    /salary|compensation|\bpay\b|benefits|perks|paid (time|leave)|\$\s?\d|₹\s?\d|usd|inr/i.test(desc) && 'pay or benefits'].filter(Boolean);
+  if (words < 40) problems.push({ label: 'Very short job description', detail: `Only ${words} words. Real job posts explain the work and the requirements. Ask the employer for the full description.`, level: 'warn' });
+  else if (parts.length >= 2) passed.push({ label: 'Detailed job description', detail: `${words} words, covering ${parts.join(', ')}` });
+  else {
+    const gaps = ['what you\'ll do', 'requirements'].filter(x => !parts.includes(x));
+    problems.push({ label: 'Job description is vague', detail: `${words} words, but it doesn't explain ${gaps.join(' or ') || 'the role'}. Ask the employer before you share documents.`, level: 'warn' });
+  }
+
+  // Still open on the original site? (opened by our server; see checkLive)
+  if (job.live_state === 'open') passed.push({ label: 'Still open on the original job site', detail: 'We opened the original posting and it is live' });
+
+  if (job.salary_max && job.salary_currency === 'USD' && job.salary_max > 400000)
+    problems.push({ label: 'Salary looks unrealistically high', detail: 'Check the pay on the company\'s own site', level: 'warn' });
+  return { ok: !problems.some(p => p.level === 'bad'), passed, problems };
+}
+
+// The page name on a hiring system, e.g. https://jobs.lever.co/razorpay/123 -> "razorpay"
+function atsBoard(url) {
+  let u; try { u = new URL(url); } catch { return null; }
+  const host = u.hostname.replace(/^www\./, ''), first = u.pathname.split('/').filter(Boolean)[0];
+  if (/(^|\.)greenhouse\.io$/.test(host)) return u.searchParams.get('for') || (first !== 'embed' ? first : null);
+  if (/^jobs\.(eu\.)?lever\.co$/.test(host) || host === 'jobs.ashbyhq.com' || /(^|\.)workable\.com$/.test(host) || host === 'jobs.smartrecruiters.com') return first || null;
+  return null;
+}
+
+
 const INDIAN_COMPANIES = [{"name":"Razorpay","website":"https://razorpay.com","founded_year":2014,"hq_city":"Bengaluru","boards":["razorpay"]},{"name":"CRED","website":"https://cred.club","founded_year":2018,"hq_city":"Bengaluru","boards":["dreamplug"]},{"name":"Meesho","website":"https://www.meesho.com","founded_year":2015,"hq_city":"Bengaluru","boards":["meesho"]},{"name":"PhonePe","website":"https://www.phonepe.com","founded_year":2015,"hq_city":"Bengaluru","boards":["phonepe"]},{"name":"ShareChat","website":"https://sharechat.com","founded_year":2015,"hq_city":"Bengaluru","boards":["sharechat","mohallatech"]},{"name":"Paytm","website":"https://paytm.com","founded_year":2010,"hq_city":"Noida","boards":["paytm"]},{"name":"Groww","website":"https://groww.in","founded_year":2016,"hq_city":"Bengaluru","boards":["groww"]},{"name":"Swiggy","website":"https://www.swiggy.com","founded_year":2014,"hq_city":"Bengaluru","boards":["swiggy"]},{"name":"Dream Sports","website":"https://www.dreamsports.group","founded_year":2008,"hq_city":"Mumbai","boards":["dreamsports","dream11"]},{"name":"Unacademy","website":"https://unacademy.com","founded_year":2015,"hq_city":"Bengaluru","boards":["unacademy"]},{"name":"upGrad","website":"https://www.upgrad.com","founded_year":2015,"hq_city":"Mumbai","boards":["upgrad"]},{"name":"Juspay","website":"https://juspay.in","founded_year":2012,"hq_city":"Bengaluru","boards":["juspay"]},{"name":"Zeta","website":"https://www.zeta.tech","founded_year":2015,"hq_city":"Bengaluru","boards":["zetasuite"]},{"name":"InMobi","website":"https://www.inmobi.com","founded_year":2007,"hq_city":"Bengaluru","boards":["inmobi"]},{"name":"Urban Company","website":"https://www.urbancompany.com","founded_year":2014,"hq_city":"Gurugram","boards":["urbancompany","urbanclap"]},{"name":"Nykaa","website":"https://www.nykaa.com","founded_year":2012,"hq_city":"Mumbai","boards":["nykaa"]},{"name":"Ola","website":"https://www.olacabs.com","founded_year":2010,"hq_city":"Bengaluru","boards":["olacabs"]},{"name":"Spinny","website":"https://www.spinny.com","founded_year":2015,"hq_city":"Gurugram","boards":["spinny"]},{"name":"Slice","website":"https://www.sliceit.com","founded_year":2016,"hq_city":"Bengaluru","boards":["sliceit"]},{"name":"Jar","website":"https://www.myjar.app","founded_year":2021,"hq_city":"Bengaluru","boards":["myjar"]}];
-return { BOARDS, ats, INDIAN_COMPANIES, indiaEligible, classifySegment, textChecks, RED_FLAGS, hostOf, TRUSTED_APPLY_HOSTS, lookupCompany };
+return { BOARDS, ats, INDIAN_COMPANIES, checkJob, indiaEligible, classifySegment, textChecks, RED_FLAGS, hostOf, TRUSTED_APPLY_HOSTS, lookupCompany };
 })();</script>
+<script>// Full company profile from public records, for the "Company check" page: type a company's name, pick it,
+// and see when it was founded, who founded and runs it, where it's based, how many people work there,
+// its industry, website, stock listing and a plain description from Wikipedia.
+//
+// Sources: Wikidata (the free public database behind Wikipedia) and Wikipedia's page summary.
+// Runs in Node (server) and, unchanged, in the browser preview.
+
+(() => {   // kept in its own scope: in the browser this file sits next to the site's own script
+const WD = 'https://www.wikidata.org/w/api.php?format=json&origin=*';
+const UA = 'Parakh job site (company background checks; https://github.com/mohityadav2027/remote-check)';
+
+async function getJson(url, tries = 4) {
+  const headers = typeof window === 'undefined' ? { 'User-Agent': UA } : {};   // Wikimedia asks servers to name themselves
+  for (let i = 1; ; i++) {
+    let res;
+    // In a browser, a "too many requests" answer arrives as a network error, so those are retried too
+    try { res = await fetch(url, { headers, signal: AbortSignal.timeout(15000) }); }
+    catch (e) { if (i >= tries || e.name === 'TimeoutError') throw e; await new Promise(r => setTimeout(r, 700 * i)); continue; }
+    if (res.ok) return res.json();
+    // Busy (too many requests from a shared connection): wait a moment and try again
+    if (i >= tries || ![429, 503].includes(res.status)) throw new Error(`${res.status} from ${new URL(url).hostname}`);
+    await new Promise(r => setTimeout(r, 700 * i));
+  }
+}
+
+// Descriptions that mean "not a company" (people, places, films…), so they go to the bottom of suggestions
+const NOT_COMPANY = /disambiguation|given name|family name|surname|\bfilm\b|album|\bsong\b|novel|television|episode|village|city|town|river|species|genus|human|politician|actor|actress|footballer|cricketer|singer|scientific article|painting|book/i;
+const COMPANY_HINT = /company|business|corporation|startup|firm|software|platform|provider|bank|agency|manufacturer|retailer|marketplace|service|conglomerate|organi[sz]ation|brand|enterprise|subsidiary|unicorn|developer|publisher|consultancy|studio|fintech|e-?commerce/i;
+
+// Suggestions while typing: Wikidata entries whose name matches, companies first
+async function suggestCompanies(q) {
+  q = String(q || '').trim();
+  if (q.length < 2) return [];
+  const r = await getJson(`${WD}&action=wbsearchentities&language=en&uselang=en&type=item&limit=10&search=${encodeURIComponent(q)}`);
+  return (r.search || [])
+    .map(s => ({ id: s.id, name: s.label, description: s.description || '', company: COMPANY_HINT.test(s.description || '') && !NOT_COMPANY.test(s.description || '') }))
+    .filter(s => s.name && !NOT_COMPANY.test(s.description))
+    .sort((a, b) => b.company - a.company)
+    .slice(0, 7);
+}
+
+const values = (e, p) => (e.claims?.[p] || []).filter(c => c.mainsnak?.datavalue && c.rank !== 'deprecated')
+  .sort((a, b) => (b.rank === 'preferred') - (a.rank === 'preferred'));
+const first = (e, p) => values(e, p)[0]?.mainsnak.datavalue.value;
+const ids = (e, p, n = 5) => values(e, p).map(c => c.mainsnak.datavalue.value?.id).filter(Boolean).slice(0, n);
+const when = c => c.qualifiers?.P585?.[0]?.datavalue?.value?.time || c.qualifiers?.P580?.[0]?.datavalue?.value?.time || '';
+const isCurrent = c => !c.qualifiers?.P582;   // no end date
+const year = t => (t ? Number(String(t).slice(1, 5)) : null);
+const dateOf = t => {   // Wikidata time "+2014-01-15T00:00:00Z" with precision: show what is known
+  if (!t) return null;
+  const [y, m, d] = String(t).slice(1, 11).split('-').map(Number);
+  return { year: y, month: m || null, day: d || null };
+};
+
+// Most recent figure of a quantity property (employees, revenue)
+function latest(e, p) {
+  const best = values(e, p).map(c => ({ n: Number(c.mainsnak.datavalue.value.amount), unit: c.mainsnak.datavalue.value.unit, at: when(c) }))
+    .filter(x => x.n > 0).sort((a, b) => b.at.localeCompare(a.at))[0];
+  return best ? { n: Math.round(best.n), year: year(best.at), unit: best.unit } : null;
+}
+
+const CURRENCY = { Q4917: 'USD', Q80524: 'INR', Q4916: 'EUR', Q25224: 'GBP', Q8146: 'JPY', Q1104069: 'CAD', Q259502: 'AUD', Q39099: 'CNY', Q190951: 'SGD' };
+
+// Everything public about one company (by its Wikidata id, e.g. Q109985545)
+async function companyProfile(qid) {
+  if (!/^Q\d+$/.test(qid || '')) throw new Error('Not a valid company id');
+  const r = await getJson(`${WD}&action=wbgetentities&props=labels|descriptions|claims|sitelinks|aliases&languages=en&sitefilter=enwiki&ids=${qid}`);
+  const e = r.entities?.[qid];
+  if (!e || e.missing !== undefined) throw new Error('Company not found');
+
+  // People and places are stored as ids: look up their names in one go
+  const ceoClaims = values(e, 'P169').filter(isCurrent);
+  const ref = {
+    founders: ids(e, 'P112', 6), ceo: ceoClaims.map(c => c.mainsnak.datavalue.value.id).slice(0, 1),
+    hq: ids(e, 'P159', 1), country: ids(e, 'P17', 1), industry: ids(e, 'P452', 4), parent: ids(e, 'P749', 1),
+    exchange: ids(e, 'P414', 1), legal: ids(e, 'P1454', 1), products: ids(e, 'P1056', 6), owner: ids(e, 'P127', 2),
+  };
+  const all = [...new Set(Object.values(ref).flat())];
+  const names = {};
+  if (all.length) {
+    const lr = await getJson(`${WD}&action=wbgetentities&props=labels&languages=en&ids=${all.slice(0, 50).join('|')}`);
+    for (const [id, x] of Object.entries(lr.entities || {})) names[id] = x.labels?.en?.value;
+  }
+  const label = list => list.map(id => names[id]).filter(Boolean);
+
+  // Plain-language description from Wikipedia, when the company has an article
+  const title = e.sitelinks?.enwiki?.title;
+  let about = null, wikipedia = null;
+  if (title) {
+    try {
+      const w = await getJson(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title.replace(/ /g, '_'))}`);
+      about = w.extract || null;
+      wikipedia = w.content_urls?.desktop?.page || `https://en.wikipedia.org/wiki/${encodeURIComponent(title)}`;
+    } catch { wikipedia = `https://en.wikipedia.org/wiki/${encodeURIComponent(title)}`; }
+  }
+
+  const ticker = values(e, 'P414')[0]?.qualifiers?.P249?.[0]?.datavalue?.value || null;
+  const revenue = latest(e, 'P2139');
+  const logo = first(e, 'P154');
+  const linkedin = first(e, 'P4264'), twitter = first(e, 'P2002');
+  return {
+    id: qid,
+    name: e.labels?.en?.value || qid,
+    official_name: first(e, 'P1448')?.text || null,
+    also_known_as: (e.aliases?.en || []).map(a => a.value).slice(0, 4),
+    description: e.descriptions?.en?.value || null,
+    about, wikipedia, wikidata: `https://www.wikidata.org/wiki/${qid}`,
+    founded: dateOf(first(e, 'P571')?.time),
+    closed: dateOf(first(e, 'P576')?.time),
+    founders: label(ref.founders), ceo: label(ref.ceo)[0] || null,
+    headquarters: label(ref.hq)[0] || null, country: label(ref.country)[0] || null,
+    industry: label(ref.industry), parent: label(ref.parent)[0] || null, owners: label(ref.owner),
+    legal_form: label(ref.legal)[0] || null, products: label(ref.products),
+    employees: latest(e, 'P1128'),
+    revenue: revenue && { amount: revenue.n, year: revenue.year, currency: CURRENCY[String(revenue.unit).split('/').pop()] || null },
+    stock: ref.exchange.length ? { exchange: label(ref.exchange)[0] || null, ticker } : null,
+    website: first(e, 'P856') || null,
+    linkedin: linkedin ? `https://www.linkedin.com/company/${linkedin}` : null,
+    twitter: twitter ? `https://x.com/${twitter}` : null,
+    logo: logo ? `https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(logo)}?width=160` : null,
+  };
+}
+
+// What the profile tells a job seeker, as pass / warn / bad checks. Pure, so the browser preview runs it too.
+function profileChecks(p, { domainCreated = null, now = new Date() } = {}) {
+  const out = [], add = (level, label, detail = '') => out.push({ level, label, detail });
+  const thisYear = now.getFullYear();
+  if (p.closed) add('bad', `Company closed in ${p.closed.year}`, 'A company that no longer exists cannot hire you. Any job using its name is fake.');
+  if (p.founded) {
+    const age = thisYear - p.founded.year;
+    add(age >= 5 ? 'ok' : age >= 2 ? 'warn' : 'warn', `Founded ${p.founded.year}`, `${age} year${age === 1 ? '' : 's'} in business${age < 2 ? ': very young, check carefully' : ''}`);
+  } else add('warn', 'Founding year not on public record', 'Ask the recruiter when the company started');
+  if (p.employees) add(p.employees.n >= 50 ? 'ok' : 'warn', `${p.employees.n.toLocaleString('en-IN')} employees`, p.employees.year ? `Figure from ${p.employees.year}` : '');
+  else add('warn', 'Team size not on public record', 'Look at the company page on LinkedIn');
+  if (p.website) {
+    if (domainCreated) {
+      const age = thisYear - Number(String(domainCreated).slice(0, 4));
+      add(age >= 2 ? 'ok' : 'warn', `Website registered ${String(domainCreated).slice(0, 4)}`, age >= 2 ? `${age} years old` : 'A new website for an old company is a warning sign');
+    } else add('ok', 'Official website on record', p.website);
+  } else add('warn', 'No official website on record', 'Real companies have a website; recruiters should write from its domain');
+  if (p.wikipedia) add('ok', 'Has a Wikipedia article', 'Independent writers have covered this company');
+  if (p.linkedin) add('ok', 'LinkedIn company page on record', 'Check that the recruiter works there on LinkedIn');
+  if (p.stock) add('ok', `Listed on ${p.stock.exchange || 'a stock exchange'}${p.stock.ticker ? ` (${p.stock.ticker})` : ''}`, 'Public companies report to regulators');
+  if (p.founders.length || p.ceo) add('ok', 'Leadership is public', [p.ceo && `CEO: ${p.ceo}`, p.founders.length && `Founders: ${p.founders.join(', ')}`].filter(Boolean).join(' · '));
+  return out;
+}
+
+const api = { suggestCompanies, companyProfile, profileChecks, UA };
+if (typeof module !== 'undefined') module.exports = api;
+else window.ParakhProfile = api;
+})();
+</script>
 <script>// Public preview: loads REAL remote jobs from job websites in the visitor's browser and builds the same
 // job list, company reports and apply links the server builds. Uses the site's own parsers and checks (LIB).
 const SEG_INFO = Object.fromEntries(DATA.pricing.segments.map(s => [s.key, s]));
@@ -966,13 +1196,8 @@ const READY = (async () => {
   for (const j of jobs) {
     const c = companies.get(j.company.toLowerCase());
     const host = LIB.hostOf(j.apply_url);
-    const passed = [], problems = [];
-    const flags = LIB.textChecks(`${j.title}\n${j.description || ''}`, c.record.website || '');
-    for (const f of flags) problems.push({ label: f.label, detail: f.why, level: f.level });
-    if (!flags.length) passed.push({ label: 'No scam signs in the job post', detail: 'No fees, chat-app recruiters, personal emails or too-good-to-be-true pay' });
-    if (host && LIB.TRUSTED_APPLY_HOSTS.test(host)) passed.push({ label: `Apply link goes to ${host}`, detail: 'A known job board or hiring system' });
-    else problems.push({ label: `Apply link goes to an unknown site (${host || 'invalid'})`, detail: 'Genuine jobs apply through a known job board or the company\'s own site', level: 'bad' });
-    const jobCheck = { ok: !problems.some(p => p.level === 'bad'), passed, problems };
+    // The same job post checks the server runs (scam signs, apply link, apply page owner, description detail)
+    const jobCheck = LIB.checkJob({ name: c.name, website: c.record.website || '' }, { title: j.title, description: j.description || '', apply_url: j.apply_url });
     const status = !jobCheck.ok ? 'failed' : c.missing.length ? 'pending' : c.report.score < MIN_SCORE ? 'failed' : 'listed';
     const segment = LIB.classifySegment(j.title, j.category);
     const job = { id: j.id, company_id: c.id, title: j.title, segment, category: j.category || null, description: j.description || '',
@@ -981,7 +1206,7 @@ const READY = (async () => {
     DATA.job[j.id] = { job, company: c.record, segment: SEG_INFO[segment], unlocked: c.report, locked: lockedOf(c.report), job_check: jobCheck, status };
     DATA.applyUrl[j.id] = j.apply_url;
     if (status === 'failed') {
-      const why = [...problems.filter(p => p.level === 'bad').map(p => p.label),
+      const why = [...jobCheck.problems.filter(p => p.level === 'bad').map(p => p.label),
         ...(c.report.score < MIN_SCORE ? c.report.signals.filter(x => x.impact < 0).map(x => x.label) : [])].slice(0, 4);
       DATA.job[j.id].removed = `"${j.title}" was removed because it failed our background check`
         + (c.report.score < MIN_SCORE ? ` (the company scored ${c.report.score}/100; we only post companies scoring ${MIN_SCORE} or more)` : '')
@@ -1064,6 +1289,14 @@ const hideSource = ({ source, apply_host, ...job }) => job;
 const hideApplyHost = check => ({ ...check, passed: check.passed.map(p => p.label.startsWith('Apply link goes to')
   ? { label: 'Apply link goes to a known job board or the company\'s own site', detail: 'The exact site is shown with a paid pass' } : p) });
 const hideBoards = c => c.feed ? { ...c, description: null } : c;
+// A company looked up on the Company check page, if its jobs are on this page too
+const norm = s => String(s || '').toLowerCase().replace(/\(.*?\)/g, '').replace(/\b(inc|llc|ltd|limited|pvt|private|gmbh|corp|corporation|co)\b|[,.]/g, ' ').replace(/\s+/g, ' ').trim();
+function onSite(name, aka = []) {
+  const d = Object.values(DATA.company || {}).find(c => [name, ...aka].some(n => norm(n) === norm(c.company.name)));
+  if (!d) return null;
+  const jobs = (DATA.list?.jobs || []).filter(j => j.company_id === d.company.id).map(j => ({ id: j.id, title: j.title, location: j.location, posted_at: j.posted_at }));
+  return { company_id: d.company.id, score: d.unlocked.score, level: d.unlocked.level, jobs: jobs.slice(0, 12), open: jobs.length, cin: null };
+}
 window.fetch = async (url, opts = {}) => {
   // Only the site's own /api/ calls are answered here; job boards and Wikidata go to the real internet
   if (!String(url).startsWith('/api/')) return realFetch(url, opts);
@@ -1071,6 +1304,18 @@ window.fetch = async (url, opts = {}) => {
   const p = u.pathname, m = (opts.method || 'GET').toUpperCase();
   const body = typeof opts.body === 'string' ? JSON.parse(opts.body) : opts.body;
   let x;
+  // Company check (doesn't wait for the job boards): public records straight from Wikidata in the visitor's browser
+  if (p === '/api/lookup/suggest') {
+    try { return reply(200, { results: await ParakhProfile.suggestCompanies(u.searchParams.get('q') || '') }); }
+    catch { return err(503, 'Company search is busy. Try again in a moment.'); }
+  }
+  if (p === '/api/lookup/site') return reply(200, { on_site: onSite(body.name, body.aka) });
+  if ((x = p.match(/^\/api\/lookup\/(Q\d+)$/))) {
+    try {
+      const profile = await ParakhProfile.companyProfile(x[1]);
+      return reply(200, { profile, domain_created: null, checks: ParakhProfile.profileChecks(profile), on_site: onSite(profile.name, profile.also_known_as) });
+    } catch (e) { return err(/not found/i.test(e.message) ? 404 : 503, /not found/i.test(e.message) ? 'Company not found.' : 'Company records are busy. Try again in a moment.'); }
+  }
   // Wait for the live job boards; if none could be reached, say so instead of showing anything made up
   const live = await READY.then(() => true, () => false);
   if (!live && (p === '/api/jobs' || p.startsWith('/api/jobs/') || p.startsWith('/api/companies/')))
@@ -1271,7 +1516,7 @@ async function loadMe() { Object.assign(state, await api('/api/me')); }
 function renderNav(page) {
   const u = state.user;
   const link = (href, label, key) => `<a href="${href}"${page === key ? ' aria-current="page"' : ''}>${label}</a>`;
-  $('#nav').innerHTML = link('#/', 'Jobs', 'jobs') + link('#/scan', 'Scan a job', 'scan') + link('#/pricing', 'Pricing', 'pricing') +
+  $('#nav').innerHTML = link('#/', 'Jobs', 'jobs') + link('#/check', 'Company check', 'check') + link('#/scan', 'Scan a job', 'scan') + link('#/pricing', 'Pricing', 'pricing') +
     (u ? (u.is_admin ? link('#/admin', 'Admin', 'admin') : '') + link('#/profile', 'My profile', 'profile') + '<button type="button" id="logout">Log out</button>'
        : link('#/login', 'Log in', 'login') + '<a href="#/signup" class="btn primary sm">Sign up</a>');
   $('#logout')?.addEventListener('click', async () => { await api('/api/logout', { method: 'POST' }); await loadMe(); loc.hash = '#/'; toast('Logged out.'); });
@@ -1527,6 +1772,7 @@ function reportHtml(c, r, unlocked) {
     ${'ats_type' in c ? `<div><dt>Hiring system</dt><dd>${c.ats_type ? `${ATS[c.ats_type]} careers page` : 'Job boards'}</dd></div>` : ''}
     <div><dt>Headquarters</dt><dd>${c.hq_country ? `${c.hq_city ? esc(c.hq_city) + ', ' : ''}${esc(c.hq_country)}` : 'Not public'}</dd></div>
     <div><dt>${/^india$/i.test(c.hq_country || '') || c.cin ? 'Indian registration (CIN)' : 'Registration'}</dt><dd>${c.cin ? esc(c.cin) : /^india$/i.test(c.hq_country || '') ? 'Not on record' : 'Outside India'}</dd></div></dl>
+    ${c.wikidata_id ? `<p style="margin-top:10px"><a class="btn sm" href="#/check/${esc(c.wikidata_id)}">Full company profile</a></p>` : ''}
     ${c.info_source ? `<p class="hint">Company details from ${c.info_source === 'wikidata' ? `<a href="https://www.wikidata.org/wiki/${esc(c.wikidata_id)}" target="_blank" rel="noopener">Wikidata</a>, the public database behind Wikipedia` : 'our team'}.</p>` : ''}`;
   const checks = `<ul class="checks">${r.signals.map(x => `<li>${stIcon(x.impact > 0 ? 'ok' : x.impact <= -8 ? 'bad' : x.impact < 0 ? 'warn' : 'n')}
     <span>${esc(x.label)}</span><span class="val">${x.impact > 0 ? '+' : ''}${x.impact}</span>${x.detail ? `<span class="det">${esc(x.detail)}</span>` : ''}</li>`).join('')}</ul>`;
@@ -1767,6 +2013,147 @@ async function jobPage(id) {
 
 // ---------- scan a job ----------
 const SAMPLE_SCAM = 'Hiring for Amazon work-from-home data entry. Earn ₹4,000 per day, no experience needed. Limited seats! Pay ₹1,499 one-time registration fee for your training kit. Contact HR Priya on Telegram @amazon_jobs_hr or email amazonhiring.india@gmail.com';
+// ---------- Company check: any company, everything public about it ----------
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const fullDate = d => d ? `${d.day && d.month ? d.day + ' ' : ''}${d.month ? MONTHS[d.month - 1] + ' ' : ''}${d.year}` : null;
+const bigNum = n => n >= 1e7 ? `${(n / 1e7).toFixed(1).replace(/\.0$/, '')} crore` : n >= 1e5 ? `${(n / 1e5).toFixed(1).replace(/\.0$/, '')} lakh` : Number(n).toLocaleString('en-IN');
+const money = r => r && r.currency ? `${r.currency} ${r.amount >= 1e9 ? (r.amount / 1e9).toFixed(1) + ' billion' : r.amount >= 1e6 ? (r.amount / 1e6).toFixed(1) + ' million' : r.amount.toLocaleString('en-IN')}${r.year ? ` (${r.year})` : ''}` : null;
+
+// Company lookups go through our server (cached). If Wikidata is busy for the server, the browser asks Wikidata itself.
+let profileLib;
+const loadProfileLib = () => profileLib ??= new Promise((ok, no) => {
+  const sc = Object.assign(document.createElement('script'), { src: '/js/profile.js' });
+  sc.onload = () => ok(window.ParakhProfile);
+  sc.onerror = () => { profileLib = null; no(new Error('Company records are busy. Try again in a moment.')); };
+  document.head.append(sc);
+});
+const isBusy = e => e.data?.code === 'BUSY';
+async function lookupSuggest(q) {
+  try { return (await api('/api/lookup/suggest?q=' + encodeURIComponent(q))).results; }
+  catch (e) { if (!isBusy(e)) throw e; return (await loadProfileLib()).suggestCompanies(q); }
+}
+async function lookupProfile(qid) {
+  try { return await api('/api/lookup/' + encodeURIComponent(qid)); }
+  catch (e) {
+    if (!isBusy(e)) throw e;
+    const L = await loadProfileLib(), profile = await L.companyProfile(qid);
+    const { on_site } = await api('/api/lookup/site', { method: 'POST', body: { qid, name: profile.name, aka: profile.also_known_as } }).catch(() => ({ on_site: null }));
+    return { profile, domain_created: null, checks: L.profileChecks(profile), on_site };
+  }
+}
+
+async function checkPage(qid) {
+  $app.innerHTML = `
+    <section class="check-hero">
+      <p class="eyebrow">Company check</p>
+      <h1>Look up any company before you apply</h1>
+      <p class="lede">Type a company's name to see when it was founded, who started and runs it, where it's based, how many people work there and whether it's still operating. From public records.</p>
+      <div class="lookup" id="lookup">
+        <label for="coQ" class="sr-only">Company name</label>
+        <input id="coQ" type="search" autocomplete="off" placeholder="Company name, e.g. Infosys, Razorpay, GitLab" role="combobox" aria-expanded="false" aria-controls="coList" aria-autocomplete="list">
+        <ul class="suggest" id="coList" role="listbox" hidden></ul>
+      </div>
+      <div class="chips try">${['Infosys', 'Razorpay', 'Zoho', 'GitLab', 'Wipro', 'Freshworks'].map(n => `<button type="button" class="chip" data-try="${n}">${n}</button>`).join('')}</div>
+    </section>
+    <div id="coResult"></div>`;
+
+  const input = $('#coQ'), list = $('#coList');
+  let items = [], active = -1, timer, seq = 0;
+  const close = () => { list.hidden = true; input.setAttribute('aria-expanded', 'false'); active = -1; };
+  const paint = () => {
+    list.innerHTML = items.length ? items.map((x, i) => `<li role="option" id="co-${x.id}" aria-selected="${i === active}" data-qid="${x.id}"><b>${esc(x.name)}</b><span>${esc(x.description || 'No description')}</span></li>`).join('')
+      : '<li class="none">No company with that name in public records</li>';
+    list.hidden = false; input.setAttribute('aria-expanded', 'true');
+    input.setAttribute('aria-activedescendant', active >= 0 ? `co-${items[active].id}` : '');
+  };
+  const search = async q => {
+    const mine = ++seq;
+    if (q.trim().length < 2) { items = []; close(); return; }
+    list.innerHTML = '<li class="none">Searching…</li>'; list.hidden = false;
+    try { const r = await lookupSuggest(q); if (mine !== seq) return; items = r; active = items.length ? 0 : -1; paint(); }
+    catch (e) { if (mine === seq) { list.innerHTML = `<li class="none">${esc(e.message)}</li>`; } }
+  };
+  const pick = x => { close(); input.value = x.name; loc.hash = '#/check/' + x.id; };
+  input.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(() => search(input.value), 250); });
+  input.addEventListener('keydown', e => {
+    if (e.key === 'ArrowDown' && items.length) { e.preventDefault(); active = (active + 1) % items.length; paint(); }
+    else if (e.key === 'ArrowUp' && items.length) { e.preventDefault(); active = (active - 1 + items.length) % items.length; paint(); }
+    else if (e.key === 'Enter' && items[active]) { e.preventDefault(); pick(items[active]); }
+    else if (e.key === 'Escape') close();
+  });
+  list.addEventListener('mousedown', e => { const li = e.target.closest('[data-qid]'); if (li) { e.preventDefault(); pick(items.find(x => x.id === li.dataset.qid)); } });
+  input.addEventListener('blur', () => setTimeout(close, 150));
+  $app.querySelectorAll('[data-try]').forEach(b => b.addEventListener('click', () => { input.value = b.dataset.try; input.focus(); search(b.dataset.try); }));
+
+  if (!qid) { input.focus(); return; }
+  const out = $('#coResult');
+  out.innerHTML = `<div class="card"><p class="hint">Looking up public records…</p></div>`;
+  let d;
+  try { d = await lookupProfile(qid); }
+  catch (e) { out.innerHTML = `<div class="notice bad" role="alert">${esc(e.message)}</div>`; return; }
+  const p = d.profile, year = new Date().getFullYear();
+  input.value = p.name;
+  document.title = `${p.name} · Company check · Parakh`;
+  const bad = d.checks.some(c => c.level === 'bad'), oks = d.checks.filter(c => c.level === 'ok').length;
+  const verdict = bad ? ['bad', 'Closed company'] : oks >= 5 ? ['ok', 'Well documented'] : oks >= 3 ? ['warn', 'Some public records'] : ['warn', 'Few public records'];
+  const domain = p.website ? domainOf(p.website) : null;
+  const link = (href, label) => href ? `<a class="btn sm" href="${esc(href)}" target="_blank" rel="noopener">${label} ↗</a>` : '';
+  const fact = (k, v) => v ? `<div><dt>${k}</dt><dd>${v}</dd></div>` : '';
+  out.innerHTML = `
+    <section class="job-hero co-hero" style="--h:${hueOf(p.name)}">
+      <div class="job-hero-top">
+        ${p.logo ? `<span class="avatar xl logo"><img src="${esc(p.logo)}" alt="" loading="lazy" onerror="this.parentNode.textContent='${esc(initials(p.name)).replace(/'/g, '')}'"></span>`
+          : `<span class="avatar xl" style="--h:${hueOf(p.name)}" aria-hidden="true">${esc(initials(p.name))}</span>`}
+        <div class="job-hero-main">
+          <p class="eyebrow">${[p.country, p.industry[0]].filter(Boolean).map(esc).join(' · ') || 'Company'}</p>
+          <h1>${esc(p.name)}</h1>
+          <p class="co">${p.description ? `<span>${esc(p.description)}</span>` : ''}${p.official_name && p.official_name !== p.name ? `<span>Registered as ${esc(p.official_name)}</span>` : ''}</p>
+        </div>
+        <div class="job-hero-score"><span class="pill ${verdict[0]}">${verdict[1]}</span></div>
+      </div>
+      <div class="acts">${link(p.website, domain || 'Website')}${link(p.linkedin, 'LinkedIn')}${link(p.twitter, 'X')}${link(p.wikipedia, 'Wikipedia')}
+        ${/india/i.test(p.country || '') ? link('https://www.mca.gov.in/content/mca/global/en/mca/master-data/MDS.html', 'Check registration on MCA') : ''}</div>
+    </section>
+    <section class="snapshot" aria-label="Company at a glance">
+      ${snap(SNAP.founded, 'Founded', p.founded ? fullDate(p.founded) : 'Not public', p.founded ? (p.closed ? `closed ${p.closed.year}` : `${year - p.founded.year} years in business`) : '')}
+      ${snap(SNAP.team, 'Employees', p.employees ? bigNum(p.employees.n) : 'Not public', p.employees?.year ? `as of ${p.employees.year}` : '')}
+      ${snap(SNAP.hq, 'Headquarters', esc(p.headquarters || p.country || 'Not public'), p.headquarters && p.country ? esc(p.country) : '')}
+      ${snap(SNAP.hiring, 'CEO', esc(p.ceo || 'Not public'), p.founders.length ? `${p.founders.length} founder${p.founders.length === 1 ? '' : 's'}` : '')}
+      ${snap(SNAP.web, 'Website', esc(domain || 'Not public'), d.domain_created ? `registered ${String(d.domain_created).slice(0, 4)}` : '')}
+    </section>
+    <div class="grid2">
+      <div class="stack">
+        <div class="card"><h2>About ${esc(p.name)}</h2>
+          ${p.about ? `<div class="desc-body"><p>${esc(p.about)}</p></div><p class="hint" style="margin-top:8px">From <a href="${esc(p.wikipedia)}" target="_blank" rel="noopener">Wikipedia</a>.</p>`
+            : `<p>${esc(p.description || 'No description in public records.')}</p><p class="hint" style="margin-top:8px">No Wikipedia article yet. Smaller and newer companies often don't have one, which isn't a warning sign on its own.</p>`}
+        </div>
+        <div class="card"><h2>Company details</h2><dl class="facts co-facts">
+          ${fact('Founded', p.founded && esc(fullDate(p.founded)))}${fact('Founders', p.founders.length && esc(p.founders.join(', ')))}
+          ${fact('CEO', p.ceo && esc(p.ceo))}${fact('Headquarters', [p.headquarters, p.country].filter(Boolean).map(esc).join(', '))}
+          ${fact('Industry', p.industry.length && esc(p.industry.join(', ')))}${fact('Employees', p.employees && `${bigNum(p.employees.n)}${p.employees.year ? ` (${p.employees.year})` : ''}`)}
+          ${fact('Stock listing', p.stock && esc([p.stock.exchange, p.stock.ticker].filter(Boolean).join(': ')))}${fact('Revenue', money(p.revenue) && esc(money(p.revenue)))}
+          ${fact('Parent company', p.parent && esc(p.parent))}${fact('Owned by', p.owners.length && esc(p.owners.join(', ')))}
+          ${fact('Legal form', p.legal_form && esc(p.legal_form))}${fact('Products', p.products.length && esc(p.products.join(', ')))}
+          ${fact('Also known as', p.also_known_as.length && esc(p.also_known_as.join(', ')))}${fact('Website registered', d.domain_created && esc(fmtDate(d.domain_created)))}
+          ${d.on_site?.cin ? fact('CIN', esc(d.on_site.cin)) : ''}
+        </dl></div>
+      </div>
+      <div class="stack">
+        <div class="card"><h2>What the records tell you</h2>
+          <ul class="checks">${d.checks.map(c => `<li>${stIcon(c.level)}<span>${esc(c.label)}</span><span></span>${c.detail ? `<span class="det">${esc(c.detail)}</span>` : ''}</li>`).join('')}</ul>
+          <p class="hint" style="margin-top:12px">Before you share documents, check the recruiter's email ends in ${domain ? `<b>@${esc(domain.replace(/^(about|careers|jobs)\./, ''))}</b>` : 'the company\'s own domain'} and that they work there on LinkedIn.</p></div>
+        <div class="card"><h2>Jobs on Parakh</h2>
+          ${d.on_site ? `<div style="display:flex;gap:14px;align-items:center;margin-bottom:12px">${seal(d.on_site.score, d.on_site.level, 56)}<div><b>Trust score ${d.on_site.score}</b><p class="hint">From our background check: hiring history, website age and job-seeker reports.</p></div></div>
+              ${d.on_site.jobs.length ? `<ul class="co-jobs">${d.on_site.jobs.map(j => `<li><a href="#/job/${j.id}">${esc(j.title)}</a><small>${remoteWhere(j.location)} · ${esc(ago(j.posted_at))}</small></li>`).join('')}</ul>`
+                : '<p class="hint">No open remote jobs from this company right now.</p>'}
+              <p style="margin-top:10px"><button type="button" class="linkbtn" data-company="${d.on_site.company_id}">See full background check</button></p>`
+            : '<p class="hint">No remote jobs from this company on Parakh yet. We add jobs every 10 hours.</p>'}
+        </div>
+      </div>
+    </div>
+    <p class="hint" style="margin-top:20px">From <a href="${esc(p.wikidata)}" target="_blank" rel="noopener">Wikidata</a> and Wikipedia, public records that anyone can correct. Confirm key facts on the company's own website.</p>`;
+}
+
 function scanPage() {
   $app.innerHTML = `
     <div class="sec-head"><div><h1>Scan a job post or recruiter message</h1>
@@ -2099,6 +2486,7 @@ async function route() {
     else if (page === 'job') await jobPage(id);
     else if (page === 'company') await companyPage(id);
     else if (page === 'scan') scanPage();
+    else if (page === 'check') await checkPage(id);
     else if (page === 'pricing') await pricingPage();
     else if (page === 'login' || page === 'signup') authPage(page);
     else if (page === 'profile') await profilePage();
