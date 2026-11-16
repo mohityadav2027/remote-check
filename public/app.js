@@ -58,6 +58,10 @@ function celebrate(el) {
   document.body.append(box); setTimeout(() => box.remove(), 1000);
 }
 const perMonth = n => { const r = n * state.fx / 12; return r >= 1e5 ? `₹${(r / 1e5).toFixed(1).replace(/\.0$/, '')}L` : `₹${Math.round(r / 1000)}k`; };
+// Where the work happens: jobs are remote; internships can also be hybrid or in an office ("In office · Pune")
+const WORKPLACE = { remote: 'Remote', hybrid: 'Hybrid', office: 'In office', field: 'On field' };
+const placeOf = j => !j.workplace || j.workplace === 'remote' ? remoteWhere(j.location)
+  : `${WORKPLACE[j.workplace]} · ${esc(String(j.location || 'India').replace(/,\s*India$/i, '') || 'India')}`;
 const freeN = () => state.trial?.limit ?? 2;   // free applications every new user gets
 const domainOf = url => { try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return ''; } };
 const params = () => new URLSearchParams(location.hash.split('?')[1] || '');
@@ -136,8 +140,8 @@ function jobCard(j, saved, i = 0) {
       <button type="button" class="bookmark" data-save="${j.id}" aria-pressed="${isSaved}" aria-label="${isSaved ? 'Remove from saved jobs' : 'Save job'}: ${esc(j.title)}" title="${isSaved ? 'Saved' : 'Save job'}">${BOOKMARK}</button>
     </div>
     <div class="tags">
-      ${isFresh(j) ? '<span class="tag new">New for you</span>' : isNew(j) ? '<span class="tag new">New</span>' : ''}<span class="tag primary">${remoteWhere(j.location)}</span>${j.kind === 'internship' ? `<span class="tag intern">Internship</span>${audienceTags(j)}` : `<span class="tag seg">${SEG[j.segment]}</span>`}
-      ${workType(j) && j.kind !== 'internship' ? `<span class="tag">${workType(j)}</span>` : ''}${timeZone(j.location) ? `<span class="tag tz">${CLOCK}${timeZone(j.location)}</span>` : ''}
+      ${isFresh(j) ? '<span class="tag new">New for you</span>' : isNew(j) ? '<span class="tag new">New</span>' : ''}<span class="tag primary">${placeOf(j)}</span>${j.kind === 'internship' ? `<span class="tag intern">Internship</span>${audienceTags(j)}` : `<span class="tag seg">${SEG[j.segment]}</span>`}
+      ${workType(j) && j.kind !== 'internship' ? `<span class="tag">${workType(j)}</span>` : ''}${timeZone(j.location) && (!j.workplace || j.workplace === 'remote') ? `<span class="tag tz">${CLOCK}${timeZone(j.location)}</span>` : ''}
       ${skills.map(s => `<span class="tag">${esc(s)}</span>`).join('')}
       ${j.match != null ? `<span class="tag ${j.match >= 50 ? 'ok' : ''}">Skill match ${j.match}%</span>` : ''}
     </div>
@@ -210,8 +214,8 @@ async function jobsPage() {
   $app.innerHTML = `
     <section class="hero">
       <div>
-        <p class="eyebrow">${interns ? "For undergraduates, master's and MBA students · Work from home" : 'For Indian professionals · International &amp; Indian companies · Remote'}</p>
-        <h1>${interns ? 'Remote internships, <em>background-checked</em> before you apply.' : 'Every remote job, <em>background-checked</em> before you apply.'}</h1>
+        <p class="eyebrow">${interns ? "For undergraduates, master's and MBA students · Remote, hybrid and in office" : 'For Indian professionals · International &amp; Indian companies · Remote'}</p>
+        <h1>${interns ? 'Internships, <em>background-checked</em> before you apply.' : 'Every remote job, <em>background-checked</em> before you apply.'}</h1>
         <p class="lede">We check each company's founding year, website age, how many jobs it posts, how many it fills, and whether the apply link is on the company's own hiring system. You apply on the employer's page.</p>
         <p class="lede"><b>Your first ${freeN()} applications are free</b>, with the full background check. ${state.user ? '' : '<a href="#/signup">Create a free account</a>'}</p>
       </div>
@@ -228,6 +232,7 @@ async function jobsPage() {
     </div>
     <div class="aud-row" id="audRow" ${interns ? '' : 'hidden'}>
       <span class="hint">For</span>${[['', 'All students'], ['ug', 'Undergraduates'], ['pg', "Master's"], ['mba', 'MBA']].map(([k, l]) => `<button type="button" class="chip" data-aud="${k}" aria-pressed="${(p.get('audience') || '') === k}">${l}</button>`).join('')}
+      <span class="aud-sep" aria-hidden="true"></span><span class="hint">Where</span>${[['', 'Anywhere'], ['remote', 'Remote'], ['hybrid', 'Hybrid'], ['office', 'In office']].map(([k, l]) => `<button type="button" class="chip" data-wp="${k}" aria-pressed="${(p.get('workplace') || '') === k}">${l}</button>`).join('')}
       <span class="hint">Not on our list? <a href="https://internshala.com/internships/work-from-home-internships/" target="_blank" rel="noopener">Browse Internshala</a> and look the company up in <a href="#/check">Company check</a> first.</span>
     </div>
     <form class="toolbar" id="filters" role="search">
@@ -252,7 +257,7 @@ async function jobsPage() {
     <p class="sources" id="sources"></p>`;
 
   const f = $('#filters');
-  const filters = { q: p.get('q') || '', segment: p.get('segment') || '', category: p.get('category') || '', hq: p.get('hq') || '', saved: p.get('saved') || '', sort: p.get('sort') || '', fresh: p.get('fresh') || '', kind: p.get('kind') || '', audience: p.get('audience') || '' };
+  const filters = { q: p.get('q') || '', segment: p.get('segment') || '', category: p.get('category') || '', hq: p.get('hq') || '', saved: p.get('saved') || '', sort: p.get('sort') || '', fresh: p.get('fresh') || '', kind: p.get('kind') || '', audience: p.get('audience') || '', workplace: p.get('workplace') || '' };
   const update = () => {
     const qs = new URLSearchParams(Object.entries(filters).filter(([, v]) => v)).toString();
     history.replaceState(null, '', '#/' + (qs ? '?' + qs : ''));
@@ -268,9 +273,14 @@ async function jobsPage() {
   f.category.addEventListener('change', () => { filters.category = f.category.value; update(); });
   // Jobs / Internships tabs, and who an internship is for
   $app.querySelectorAll('[data-kind]').forEach(b => b.addEventListener('click', () => {
-    filters.kind = b.dataset.kind; if (filters.kind !== 'internship') filters.audience = '';
+    filters.kind = b.dataset.kind; if (filters.kind !== 'internship') filters.audience = filters.workplace = '';
     const qs = new URLSearchParams(Object.entries(filters).filter(([, v]) => v)).toString();
     location.hash = '#/' + (qs ? '?' + qs : '');   // re-render, so the heading matches
+  }));
+  $app.querySelectorAll('[data-wp]').forEach(b => b.addEventListener('click', () => {
+    filters.workplace = b.dataset.wp;
+    $app.querySelectorAll('[data-wp]').forEach(x => x.setAttribute('aria-pressed', x === b));
+    update();
   }));
   $app.querySelectorAll('[data-aud]').forEach(b => b.addEventListener('click', () => {
     filters.audience = b.dataset.aud;
@@ -493,7 +503,7 @@ function formatDesc(text) {
 function remoteGlance(j) {
   const tz = timeZone(j.location);
   return `<dl class="facts">
-    <div><dt>Work from</dt><dd>${remoteWhere(j.location).replace('Remote · ', '')}</dd></div>
+    <div><dt>Work from</dt><dd>${j.workplace && j.workplace !== 'remote' ? placeOf(j) : remoteWhere(j.location).replace('Remote · ', '')}</dd></div>
     <div><dt>Work type</dt><dd>${workType(j) || 'See posting'}</dd></div>
     <div><dt>Time zone</dt><dd>${tz || 'Ask the employer'}</dd></div>
     <div><dt>Pay a month</dt><dd>${j.unpaid ? 'Unpaid' : j.salary_min && isMonthlyInr(j) ? `${inr(j.salary_min)}${j.salary_max > j.salary_min ? ` – ${inr(j.salary_max)}` : ''}` : j.salary_min && state.fx ? `${perMonth(j.salary_min)} – ${perMonth(j.salary_max)}` : 'Not listed'}</dd></div>
@@ -522,13 +532,13 @@ async function jobPage(id) {
         <div class="job-hero-main">
           <p class="eyebrow">${j.kind === 'internship' ? 'Internship · ' : ''}${j.category ? esc(j.category) + ' · ' : ''}${esc(d.segment.name)} pass</p>
           <h1>${esc(j.title)}</h1>
-          <p class="co"><button type="button" class="linkbtn" data-company="${c.id}">${esc(c.name)}</button><span>${remoteWhere(j.location)}</span>
+          <p class="co"><button type="button" class="linkbtn" data-company="${c.id}">${esc(c.name)}</button><span>${placeOf(j)}</span>
             <span>Posted ${esc(ago(j.posted_at))}${j.source ? ` via ${esc(j.source)}` : ''}</span></p>
         </div>
         <div class="job-hero-score">${seal(d.report.score, d.report.level, 72)}${pill(d.report.level)}</div>
       </div>
-      <div class="tags">${isNew(j) ? '<span class="tag new">New</span>' : ''}<span class="tag primary">${remoteWhere(j.location)}</span>${j.kind === 'internship' ? `<span class="tag intern">Internship</span>${audienceTags(j)}` : ''}
-        ${workType(j) && j.kind !== 'internship' ? `<span class="tag">${workType(j)}</span>` : ''}${timeZone(j.location) ? `<span class="tag tz">${CLOCK}${timeZone(j.location)}</span>` : ''}
+      <div class="tags">${isNew(j) ? '<span class="tag new">New</span>' : ''}<span class="tag primary">${placeOf(j)}</span>${j.kind === 'internship' ? `<span class="tag intern">Internship</span>${audienceTags(j)}` : ''}
+        ${workType(j) && j.kind !== 'internship' ? `<span class="tag">${workType(j)}</span>` : ''}${timeZone(j.location) && (!j.workplace || j.workplace === 'remote') ? `<span class="tag tz">${CLOCK}${timeZone(j.location)}</span>` : ''}
         ${j.match != null ? `<span class="tag ${j.match >= 50 ? 'ok' : ''}">Skill match ${j.match}%</span>` : ''}</div>
       <div class="job-hero-foot">
         <div class="pay-big">${j.unpaid ? '<b>Unpaid internship</b><span>Ask about a certificate or a letter of recommendation</span>'

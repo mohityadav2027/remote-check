@@ -43,6 +43,7 @@ const FIXTURES = {
       required_skills: [{ skill_name: 'Social Media' }], end_date: '2099-12-31T00:00:00+05:30', approved_date: '2026-11-16 09:46:50 GMT+0530' },
     { id: 9002, title: 'Sales Internship', seo_url: 'https://unstop.com/internships/sales-internship-acme-9002', organisation: { name: 'Acme' },
       details: 'Sell things', jobDetail: { type: 'in_office', paid_unpaid: 'unpaid' }, filters: [{ type: 'eligible', name: 'Postgraduate' }],
+      locations: [{ city: 'Pune', country: 'India' }, { city: 'Mumbai', country: 'India' }],
       required_skills: [], end_date: '2099-12-31T00:00:00+05:30', approved_date: '2026-11-16 09:46:50 GMT+0530' },
     { id: 9003, title: 'Senior Analyst Internship', seo_url: 'https://unstop.com/internships/x-9003', organisation: { name: 'Acme' },
       details: 'x', jobDetail: { type: 'wfh' }, filters: [{ type: 'eligible', name: 'Experienced Professionals' }], required_skills: [] },
@@ -316,7 +317,11 @@ test('internships: Unstop work-from-home internships for students, who they are 
   const mk = list.find(j => j.external_id === 'unstop-9001');
   assert.equal(mk.audience, 'ug,mba'); assert.equal(mk.salary_min, 8000); assert.equal(mk.pay_period, 'month'); assert.equal(mk.salary_currency, 'INR');
   assert.ok(indiaEligible(mk), 'remote internship kept');
-  assert.ok(!indiaEligible(list.find(j => j.external_id === 'unstop-9002')), 'office internship skipped');
+  const office = list.find(j => j.external_id === 'unstop-9002');
+  assert.equal(office.workplace, 'office'); assert.equal(office.location, 'Pune, Mumbai, India'); assert.ok(office.unpaid);
+  assert.ok(indiaEligible(office), 'office internship in India kept');
+  assert.equal(mk.workplace, 'remote');
+  assert.ok(!indiaEligible({ location: 'London, United Kingdom', workplace: 'office' }), 'office internship abroad skipped');
   assert.ok(isInternship({ title: 'Product Management Intern' }) && !isInternship({ title: 'Internal Auditor' }));
   assert.equal(audienceOf('Open to MBA and PGDM students'), 'mba');
   assert.equal(audienceOf('Final-year B.Tech students'), 'ug');

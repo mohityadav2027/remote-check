@@ -35,7 +35,7 @@ The score runs from 0 to 100: **Verified** is 70 or more, **Check carefully** is
 
 ## Internships
 - **Internships** (top menu, or the Jobs / Internships tabs): remote internships for undergraduates, master's and MBA students, with the stipend in rupees a month, who can apply and the application deadline. Filter by Undergraduates, Master's or MBA.
-- From **Unstop**'s public listing API (its robots.txt allows `/api/public/`), plus any job titled "intern" on the other job sites. Only work-from-home internships open to students are imported, and they close on their deadline.
+- From **Unstop**'s public listing API (its robots.txt allows `/api/public/`), plus any job titled "intern" on the other job sites. Remote, hybrid and in-office internships in India that are open to students are imported (office ones show the city), with a Remote / Hybrid / In office filter. They close on their deadline. Jobs stay remote-only.
 - They pass the same checks as jobs: scam signs (fees, WhatsApp/Telegram recruiters, asking for ID or bank details), and the company must have a founding year and website on record (or added by you in Admin) before it is posted.
 - **Internshala** is not imported: its robots.txt blocks automated reading of its listings. The Internships page links to it and suggests checking the company in Company check.
 

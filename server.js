@@ -149,15 +149,15 @@ app.put('/api/profile/applications/:jobId', auth, (req, res) => {
 let visibleCategories = null;
 app.get('/api/jobs', (req, res) => {
   const user = currentUser(req);
-  const { q = '', segment = '', category = '', hq = '', minScore = '', showRisky = '', kind = '', audience = '' } = req.query;
+  const { q = '', segment = '', category = '', hq = '', minScore = '', showRisky = '', kind = '', audience = '', workplace = '' } = req.query;
   // kind: 'internship' or 'job' ('' = both). audience: 'ug' | 'pg' | 'mba' (internships for that kind of student)
   const rows = db.prepare(`SELECT j.*, c.name company_name, c.founded_year, c.hq_country, c.hq_city FROM jobs j JOIN companies c ON c.id=j.company_id
     WHERE j.status='open' AND j.india_eligible=1
       AND (? = '' OR j.title LIKE ? OR j.tags LIKE ? OR c.name LIKE ?)
       AND (? = '' OR j.segment = ?) AND (? = '' OR j.category = ?) AND (? = '' OR lower(c.hq_country) = lower(?))
-      AND (? = '' OR coalesce(j.kind, 'job') = ?) AND (? = '' OR (',' || j.audience || ',') LIKE ?)
+      AND (? = '' OR coalesce(j.kind, 'job') = ?) AND (? = '' OR (',' || j.audience || ',') LIKE ?) AND (? = '' OR coalesce(j.workplace, 'remote') = ?)
     ORDER BY j.posted_at DESC LIMIT 300`)
-    .all(q, `%${q}%`, `%${q}%`, `%${q}%`, segment, segment, category, category, hq, hq, kind, kind, audience, `%,${audience},%`);
+    .all(q, `%${q}%`, `%${q}%`, `%${q}%`, segment, segment, category, category, hq, hq, kind, kind, audience, `%,${audience},%`, workplace, workplace);
 
   // One company score, shown the same on the list, the job page and the company report
   const companies = {};
@@ -176,7 +176,7 @@ app.get('/api/jobs', (req, res) => {
   }).filter(j => ((showRisky === '1' && user?.is_admin) || j.listing === 'listed') && j.trust_score >= (Number(minScore) || 0));
 
   // Category menu: only categories that have jobs people can see (remembered from the last unfiltered list)
-  if (!q && !segment && !category && !hq && !kind && !audience) visibleCategories = [...new Set(jobs.map(j => j.category).filter(Boolean))].sort();
+  if (!q && !segment && !category && !hq && !kind && !audience && !workplace) visibleCategories = [...new Set(jobs.map(j => j.category).filter(Boolean))].sort();
   const categories = visibleCategories ?? db.prepare(`SELECT DISTINCT category FROM jobs WHERE status='open' AND category IS NOT NULL ORDER BY category`).all().map(r => r.category);
   res.json({ jobs: jobs.slice(0, 100), categories, min_score: MIN_SCORE, hidden_risky: blocked.length, blocked: blocked.slice(0, 10), pending,
     companies: new Set(jobs.map(j => j.company_id)).size,
