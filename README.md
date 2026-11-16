@@ -33,6 +33,12 @@ The score runs from 0 to 100: **Verified** is 70 or more, **Check carefully** is
 - Companies Wikidata doesn't have show under **Admin → Companies missing details**. Click **Fill in**, add the founding year and website, and their jobs are posted on the next page load.
 - Jobs from companies without details aren't shown. The jobs page counts them ("N more jobs not posted yet"), and their job page explains why.
 
+## Internships
+- **Internships** (top menu, or the Jobs / Internships tabs): remote internships for undergraduates, master's and MBA students, with the stipend in rupees a month, who can apply and the application deadline. Filter by Undergraduates, Master's or MBA.
+- From **Unstop**'s public listing API (its robots.txt allows `/api/public/`), plus any job titled "intern" on the other job sites. Only work-from-home internships open to students are imported, and they close on their deadline.
+- They pass the same checks as jobs: scam signs (fees, WhatsApp/Telegram recruiters, asking for ID or bank details), and the company must have a founding year and website on record (or added by you in Admin) before it is posted.
+- **Internshala** is not imported: its robots.txt blocks automated reading of its listings. The Internships page links to it and suggests checking the company in Company check.
+
 ## Company check
 - **Company check** (top menu): type any company's name and pick it from the list to see its full public profile: founding date, founders, CEO, headquarters, employees, industry, stock listing, parent company, website age, LinkedIn, and a plain description from Wikipedia. It also shows the company's jobs on Parakh and its trust score.
 - Data comes from Wikidata and Wikipedia (free, no key). Results are cached for 7 days. If Wikidata is busy for the server, the visitor's browser looks the company up directly.

@@ -13,7 +13,14 @@ const inr = n => '₹' + Math.round(n).toLocaleString('en-IN');
 const parseDate = d => new Date(String(d).includes('T') ? d : String(d).replace(' ', 'T') + 'Z');
 const fmtDate = d => (d ? parseDate(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '');
 const ago = d => { const days = Math.floor((Date.now() - parseDate(d)) / 864e5); return days <= 0 ? 'today' : days === 1 ? '1 day ago' : `${days} days ago`; };
-const salary = j => (j.salary_min ? `$${Math.round(j.salary_min / 1000)}k–$${Math.round(j.salary_max / 1000)}k / yr` : 'Pay not listed');
+// Pay: jobs are in US dollars a year; internship stipends (e.g. from Unstop) in rupees a month
+const isMonthlyInr = j => j.salary_currency === 'INR';
+const salary = j => j.unpaid ? 'Unpaid' : !j.salary_min ? 'Pay not listed'
+  : isMonthlyInr(j) ? `₹${Math.round(j.salary_min / 1000)}k–₹${Math.round(j.salary_max / 1000)}k / month` : `$${Math.round(j.salary_min / 1000)}k–$${Math.round(j.salary_max / 1000)}k / yr`;
+const yearlyUsd = j => !j.salary_max ? 0 : isMonthlyInr(j) ? j.salary_max * 12 / (state.fx || 85) : j.salary_max;   // for sorting by pay
+const AUDIENCE = { ug: 'Undergraduates', pg: "Master's", mba: 'MBA' };
+const audienceTags = j => String(j.audience || '').split(',').filter(a => AUDIENCE[a]).map(a => `<span class="tag aud">${AUDIENCE[a]}</span>`).join('');
+const shortDate = d => { const t = new Date(d + 'T00:00:00'); return isNaN(t) ? d : `${t.getDate()} ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][t.getMonth()]}`; };
 // Every job on Parakh is remote; show who can apply, e.g. "Remote · India"
 const remoteWhere = loc => { const l = String(loc || '').replace(/^remote\s*[,·–-]?\s*/i, '').trim(); return `Remote · ${esc(l || 'Worldwide')}`; };
 // Remote-work details read from the posting itself (title, tags, description, location); shown only when the posting says so
@@ -86,7 +93,7 @@ async function loadMe() { Object.assign(state, await api('/api/me')); }
 function renderNav(page) {
   const u = state.user;
   const link = (href, label, key) => `<a href="${href}"${page === key ? ' aria-current="page"' : ''}>${label}</a>`;
-  $('#nav').innerHTML = link('#/', 'Jobs', 'jobs') + link('#/check', 'Company check', 'check') + link('#/scan', 'Scan a job', 'scan') + link('#/pricing', 'Pricing', 'pricing') +
+  $('#nav').innerHTML = link('#/', 'Jobs', 'jobs') + link('#/?kind=internship', 'Internships', 'internships') + link('#/check', 'Company check', 'check') + link('#/scan', 'Scan a job', 'scan') + link('#/pricing', 'Pricing', 'pricing') +
     (u ? (u.is_admin ? link('#/admin', 'Admin', 'admin') : '') + link('#/profile', 'My profile', 'profile') + '<button type="button" id="logout">Log out</button>'
        : link('#/login', 'Log in', 'login') + '<a href="#/signup" class="btn primary sm">Sign up</a>');
   $('#logout')?.addEventListener('click', async () => { await api('/api/logout', { method: 'POST' }); await loadMe(); location.hash = '#/'; toast('Logged out.'); });
@@ -129,15 +136,17 @@ function jobCard(j, saved, i = 0) {
       <button type="button" class="bookmark" data-save="${j.id}" aria-pressed="${isSaved}" aria-label="${isSaved ? 'Remove from saved jobs' : 'Save job'}: ${esc(j.title)}" title="${isSaved ? 'Saved' : 'Save job'}">${BOOKMARK}</button>
     </div>
     <div class="tags">
-      ${isFresh(j) ? '<span class="tag new">New for you</span>' : isNew(j) ? '<span class="tag new">New</span>' : ''}<span class="tag primary">${remoteWhere(j.location)}</span><span class="tag seg">${SEG[j.segment]}</span>
-      ${workType(j) ? `<span class="tag">${workType(j)}</span>` : ''}${timeZone(j.location) ? `<span class="tag tz">${CLOCK}${timeZone(j.location)}</span>` : ''}
+      ${isFresh(j) ? '<span class="tag new">New for you</span>' : isNew(j) ? '<span class="tag new">New</span>' : ''}<span class="tag primary">${remoteWhere(j.location)}</span>${j.kind === 'internship' ? `<span class="tag intern">Internship</span>${audienceTags(j)}` : `<span class="tag seg">${SEG[j.segment]}</span>`}
+      ${workType(j) && j.kind !== 'internship' ? `<span class="tag">${workType(j)}</span>` : ''}${timeZone(j.location) ? `<span class="tag tz">${CLOCK}${timeZone(j.location)}</span>` : ''}
       ${skills.map(s => `<span class="tag">${esc(s)}</span>`).join('')}
       ${j.match != null ? `<span class="tag ${j.match >= 50 ? 'ok' : ''}">Skill match ${j.match}%</span>` : ''}
     </div>
     <div class="job-foot">
-      <div class="salary-group">${j.salary_min
-        ? `<span class="salary-pill">${usd(j.salary_min)} – ${usd(j.salary_max)} <small>/ yr</small></span>${state.fx ? `<span class="hint">≈ ${lakhs(j.salary_min)} – ${lakhs(j.salary_max)} a year</span>` : ''}`
-        : '<span class="salary-pill muted">Pay not listed</span>'}${j.source ? `<span class="hint">via ${esc(j.source)}</span>` : ''}</div>
+      <div class="salary-group">${j.unpaid ? '<span class="salary-pill muted">Unpaid</span>'
+        : j.salary_min && isMonthlyInr(j) ? `<span class="salary-pill">${inr(j.salary_min)}${j.salary_max > j.salary_min ? ` – ${inr(j.salary_max)}` : ''} <small>/ month</small></span><span class="hint">Stipend</span>`
+        : j.salary_min ? `<span class="salary-pill">${usd(j.salary_min)} – ${usd(j.salary_max)} <small>/ yr</small></span>${state.fx ? `<span class="hint">≈ ${lakhs(j.salary_min)} – ${lakhs(j.salary_max)} a year</span>` : ''}`
+        : `<span class="salary-pill muted">${j.kind === 'internship' ? 'Stipend not listed' : 'Pay not listed'}</span>`}
+        ${j.deadline ? `<span class="hint deadline">Apply by ${shortDate(j.deadline)}</span>` : ''}${j.source ? `<span class="hint">via ${esc(j.source)}</span>` : ''}</div>
       <a class="btn primary" href="#/job/${j.id}">View &amp; apply</a>
     </div>
   </article>`;
@@ -197,12 +206,12 @@ function toggleSave(b) {
 }
 
 async function jobsPage() {
-  const p = params();
+  const p = params(), interns = p.get('kind') === 'internship';
   $app.innerHTML = `
     <section class="hero">
       <div>
-        <p class="eyebrow">For Indian professionals · International &amp; Indian companies · Remote</p>
-        <h1>Every remote job, <em>background-checked</em> before you apply.</h1>
+        <p class="eyebrow">${interns ? "For undergraduates, master's and MBA students · Work from home" : 'For Indian professionals · International &amp; Indian companies · Remote'}</p>
+        <h1>${interns ? 'Remote internships, <em>background-checked</em> before you apply.' : 'Every remote job, <em>background-checked</em> before you apply.'}</h1>
         <p class="lede">We check each company's founding year, website age, how many jobs it posts, how many it fills, and whether the apply link is on the company's own hiring system. You apply on the employer's page.</p>
         <p class="lede"><b>Your first ${freeN()} applications are free</b>, with the full background check. ${state.user ? '' : '<a href="#/signup">Create a free account</a>'}</p>
       </div>
@@ -214,6 +223,13 @@ async function jobsPage() {
       <li>${STEP_ICONS.check}<div><b>We check the company</b><span>Founding year, website age, hiring history and scam signs. Under 50 isn't posted.</span></div></li>
       <li>${STEP_ICONS.apply}<div><b>Apply on the employer's page</b><span>Your first ${freeN()} applications are free. We never take money for a job.</span></div></li>
     </ol>
+    <div class="kind-tabs" role="group" aria-label="Jobs or internships">
+      ${[['', 'Everything'], ['job', 'Jobs'], ['internship', 'Internships']].map(([k, l]) => `<button type="button" class="kind" data-kind="${k}" aria-pressed="${(p.get('kind') || '') === k}">${l}${k === 'internship' ? ' <span class="n" id="internN"></span>' : ''}</button>`).join('')}
+    </div>
+    <div class="aud-row" id="audRow" ${interns ? '' : 'hidden'}>
+      <span class="hint">For</span>${[['', 'All students'], ['ug', 'Undergraduates'], ['pg', "Master's"], ['mba', 'MBA']].map(([k, l]) => `<button type="button" class="chip" data-aud="${k}" aria-pressed="${(p.get('audience') || '') === k}">${l}</button>`).join('')}
+      <span class="hint">Not on our list? <a href="https://internshala.com/internships/work-from-home-internships/" target="_blank" rel="noopener">Browse Internshala</a> and look the company up in <a href="#/check">Company check</a> first.</span>
+    </div>
     <form class="toolbar" id="filters" role="search">
       <label for="q" class="sr-only">Search jobs</label>
       <input id="q" name="q" type="search" placeholder="Search role, skill or company" value="${esc(p.get('q'))}">
@@ -236,7 +252,7 @@ async function jobsPage() {
     <p class="sources" id="sources"></p>`;
 
   const f = $('#filters');
-  const filters = { q: p.get('q') || '', segment: p.get('segment') || '', category: p.get('category') || '', hq: p.get('hq') || '', saved: p.get('saved') || '', sort: p.get('sort') || '', fresh: p.get('fresh') || '' };
+  const filters = { q: p.get('q') || '', segment: p.get('segment') || '', category: p.get('category') || '', hq: p.get('hq') || '', saved: p.get('saved') || '', sort: p.get('sort') || '', fresh: p.get('fresh') || '', kind: p.get('kind') || '', audience: p.get('audience') || '' };
   const update = () => {
     const qs = new URLSearchParams(Object.entries(filters).filter(([, v]) => v)).toString();
     history.replaceState(null, '', '#/' + (qs ? '?' + qs : ''));
@@ -250,6 +266,17 @@ async function jobsPage() {
     update();
   }));
   f.category.addEventListener('change', () => { filters.category = f.category.value; update(); });
+  // Jobs / Internships tabs, and who an internship is for
+  $app.querySelectorAll('[data-kind]').forEach(b => b.addEventListener('click', () => {
+    filters.kind = b.dataset.kind; if (filters.kind !== 'internship') filters.audience = '';
+    const qs = new URLSearchParams(Object.entries(filters).filter(([, v]) => v)).toString();
+    location.hash = '#/' + (qs ? '?' + qs : '');   // re-render, so the heading matches
+  }));
+  $app.querySelectorAll('[data-aud]').forEach(b => b.addEventListener('click', () => {
+    filters.audience = b.dataset.aud;
+    $app.querySelectorAll('[data-aud]').forEach(x => x.setAttribute('aria-pressed', x === b));
+    update();
+  }));
   f.sort.value = filters.sort;
   f.sort.addEventListener('change', () => { filters.sort = f.sort.value; update(); });
   $('#freshBar').addEventListener('click', e => { if (e.target.closest('#freshOnly')) { filters.fresh = filters.fresh ? '' : '1'; update(); } });
@@ -295,13 +322,14 @@ async function loadJobs(filters, first = false) {
   if (first) { sel.innerHTML += data.categories.map(c => `<option>${esc(c)}</option>`).join(''); sel.value = filters.category; }
   // Only green (score 70+) jobs are called verified; the rest passed the scam checks but need a closer look
   const verified = data.jobs.filter(j => j.trust_level === 'verified').length;
-  $('#status').innerHTML = `<span><i class="dot" aria-hidden="true"></i><b><span data-count="${data.jobs.length}">${data.jobs.length}</span> checked job${data.jobs.length === 1 ? '' : 's'}</b> from <b><span data-count="${data.companies}">${data.companies}</span> compan${data.companies === 1 ? 'y' : 'ies'}</b></span>
+  $('#status').innerHTML = `<span><i class="dot" aria-hidden="true"></i><b><span data-count="${data.jobs.length}">${data.jobs.length}</span> checked ${filters.kind === 'internship' ? 'internship' : 'job'}${data.jobs.length === 1 ? '' : 's'}</b> from <b><span data-count="${data.companies}">${data.companies}</span> compan${data.companies === 1 ? 'y' : 'ies'}</b></span>
     <span><b data-count="${verified}">${verified}</b> verified · <b>${data.jobs.length - verified}</b> to check carefully</span>
     <span>${(() => { const every = data.import_hours || 10, next = data.last_refresh && ts(data.last_refresh) + every * 36e5 - Date.now();
       return next > 0 ? `Updated ${esc(ago(data.last_refresh))} · <b>next new jobs in ${untilText(next)}</b>` : `New jobs added every ${every} hours`; })()}</span>
     <span>Jobs scoring under ${data.min_score ?? 50} are not posted</span>
     ${data.pending ? `<span>${data.pending} more job${data.pending === 1 ? '' : 's'} not posted yet: we don't have proper details about ${data.pending === 1 ? 'that company' : 'those companies'}</span>` : ''}`;
   countUp($('#status'));
+  if ($('#internN')) $('#internN').textContent = data.internships || '';
   const saved = savedJobs();
   const shown = (filters.saved ? data.jobs.filter(j => saved.has(j.id)) : [...data.jobs]).filter(j => !filters.fresh || isFresh(j));
   const fresh = data.jobs.filter(isFresh).length, bar = $('#freshBar');
@@ -309,7 +337,7 @@ async function loadJobs(filters, first = false) {
   if (fresh) bar.innerHTML = `<span class="spark" aria-hidden="true">✦</span><span><b>${fresh} new job${fresh === 1 ? '' : 's'}</b> since your last visit</span>
     <button type="button" class="btn sm" id="freshOnly" aria-pressed="${Boolean(filters.fresh)}">${filters.fresh ? 'Show all jobs' : 'Show only new'}</button>`;
   if (filters.sort === 'score') shown.sort((a, b) => b.trust_score - a.trust_score);
-  if (filters.sort === 'pay') shown.sort((a, b) => (b.salary_max || 0) - (a.salary_max || 0));
+  if (filters.sort === 'pay') shown.sort((a, b) => yearlyUsd(b) - yearlyUsd(a));
   // Browse by role: the biggest categories, counted once from the first list
   if (first) {
     const counts = {};
@@ -468,7 +496,9 @@ function remoteGlance(j) {
     <div><dt>Work from</dt><dd>${remoteWhere(j.location).replace('Remote · ', '')}</dd></div>
     <div><dt>Work type</dt><dd>${workType(j) || 'See posting'}</dd></div>
     <div><dt>Time zone</dt><dd>${tz || 'Ask the employer'}</dd></div>
-    <div><dt>Pay a month</dt><dd>${j.salary_min && state.fx ? `${perMonth(j.salary_min)} – ${perMonth(j.salary_max)}` : 'Not listed'}</dd></div></dl>
+    <div><dt>Pay a month</dt><dd>${j.unpaid ? 'Unpaid' : j.salary_min && isMonthlyInr(j) ? `${inr(j.salary_min)}${j.salary_max > j.salary_min ? ` – ${inr(j.salary_max)}` : ''}` : j.salary_min && state.fx ? `${perMonth(j.salary_min)} – ${perMonth(j.salary_max)}` : 'Not listed'}</dd></div>
+    ${j.kind === 'internship' ? `<div><dt>Open to</dt><dd>${String(j.audience || '').split(',').map(a => AUDIENCE[a]).filter(Boolean).join(', ') || 'Students'}</dd></div>
+      <div><dt>Apply by</dt><dd>${j.deadline ? shortDate(j.deadline) : 'See posting'}</dd></div>` : ''}</dl>
     ${isAsync(j) ? '<p class="hint" style="margin-top:10px">This team works async, so set hours matter less.</p>' : ''}
     <h3 class="sub">Before you apply</h3>
     <ul class="ready">
@@ -490,18 +520,21 @@ async function jobPage(id) {
       <div class="job-hero-top">
         <span class="avatar xl" style="--h:${hueOf(c.name)}" aria-hidden="true">${esc(initials(c.name))}</span>
         <div class="job-hero-main">
-          <p class="eyebrow">${j.category ? esc(j.category) + ' · ' : ''}${esc(d.segment.name)} pass</p>
+          <p class="eyebrow">${j.kind === 'internship' ? 'Internship · ' : ''}${j.category ? esc(j.category) + ' · ' : ''}${esc(d.segment.name)} pass</p>
           <h1>${esc(j.title)}</h1>
           <p class="co"><button type="button" class="linkbtn" data-company="${c.id}">${esc(c.name)}</button><span>${remoteWhere(j.location)}</span>
             <span>Posted ${esc(ago(j.posted_at))}${j.source ? ` via ${esc(j.source)}` : ''}</span></p>
         </div>
         <div class="job-hero-score">${seal(d.report.score, d.report.level, 72)}${pill(d.report.level)}</div>
       </div>
-      <div class="tags">${isNew(j) ? '<span class="tag new">New</span>' : ''}<span class="tag primary">${remoteWhere(j.location)}</span>
-        ${workType(j) ? `<span class="tag">${workType(j)}</span>` : ''}${timeZone(j.location) ? `<span class="tag tz">${CLOCK}${timeZone(j.location)}</span>` : ''}
+      <div class="tags">${isNew(j) ? '<span class="tag new">New</span>' : ''}<span class="tag primary">${remoteWhere(j.location)}</span>${j.kind === 'internship' ? `<span class="tag intern">Internship</span>${audienceTags(j)}` : ''}
+        ${workType(j) && j.kind !== 'internship' ? `<span class="tag">${workType(j)}</span>` : ''}${timeZone(j.location) ? `<span class="tag tz">${CLOCK}${timeZone(j.location)}</span>` : ''}
         ${j.match != null ? `<span class="tag ${j.match >= 50 ? 'ok' : ''}">Skill match ${j.match}%</span>` : ''}</div>
       <div class="job-hero-foot">
-        <div class="pay-big">${j.salary_min ? `<b>${usd(j.salary_min)} – ${usd(j.salary_max)}</b><span>a year${state.fx ? ` · about ${lakhs(j.salary_min)} – ${lakhs(j.salary_max)} in rupees` : ''}</span>` : '<b>Pay not listed</b><span>Ask during the interview</span>'}</div>
+        <div class="pay-big">${j.unpaid ? '<b>Unpaid internship</b><span>Ask about a certificate or a letter of recommendation</span>'
+          : j.salary_min && isMonthlyInr(j) ? `<b>${inr(j.salary_min)}${j.salary_max > j.salary_min ? ` – ${inr(j.salary_max)}` : ''}</b><span>stipend a month${j.deadline ? ` · apply by ${shortDate(j.deadline)}` : ''}</span>`
+          : j.salary_min ? `<b>${usd(j.salary_min)} – ${usd(j.salary_max)}</b><span>a year${state.fx ? ` · about ${lakhs(j.salary_min)} – ${lakhs(j.salary_max)} in rupees` : ''}</span>`
+          : `<b>${j.kind === 'internship' ? 'Stipend not listed' : 'Pay not listed'}</b><span>${j.deadline ? `Apply by ${shortDate(j.deadline)}` : 'Ask during the interview'}</span>`}</div>
         <div class="acts">${applyControl(d)}</div>
       </div>
       <p class="hint">${!d.applied && state.user && d.free
@@ -1049,7 +1082,7 @@ async function route() {
   closeCompany();
   const [path] = location.hash.slice(1).split('?');
   const [page = '', id] = (path || '/').split('/').filter(Boolean);
-  const key = { '': 'jobs', job: 'jobs', company: 'jobs' }[page] ?? page;
+  const key = !page && params().get('kind') === 'internship' ? 'internships' : { '': 'jobs', job: 'jobs', company: 'jobs' }[page] ?? page;
   renderNav(key);
   try {
     if (!page) await jobsPage();

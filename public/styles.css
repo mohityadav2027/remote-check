@@ -378,6 +378,18 @@ table.admin th { font-size: 12px; text-transform: uppercase; letter-spacing: .08
 .co-jobs li { display: grid; padding: 8px 0; border-top: 1px dashed var(--line); } .co-jobs li:first-child { border-top: 0; }
 .co-jobs small { color: var(--muted); }
 
+/* ---------- internships ---------- */
+.tag.intern { background: #E6F0FF; color: #1D4ED8; font-weight: 600; } .tag.aud { background: var(--ok-soft); color: var(--ok); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .tag.intern { background: #172B4D; color: #8DB4FF; } }
+:root[data-theme="dark"] .tag.intern { background: #172B4D; color: #8DB4FF; }
+.kind-tabs { display: inline-flex; gap: 4px; padding: 4px; border-radius: 12px; background: var(--sunk); margin-bottom: 12px; }
+.kind { border: 0; background: transparent; padding: 8px 16px; border-radius: 9px; font-weight: 600; font-size: 14.5px; cursor: pointer; color: var(--muted); transition: background .15s, color .15s; }
+.kind[aria-pressed="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 1px 3px rgb(15 30 51 / .12); }
+.kind .n { font: 700 12px var(--f-mono); color: var(--accent); }
+.aud-row { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; margin-bottom: 14px; }
+.aud-row .hint:last-child { flex-basis: 100%; margin-top: 4px; }
+.deadline { color: var(--warn); font-weight: 600; }
+
 /* ---------- motion ---------- */
 @keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
 @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
