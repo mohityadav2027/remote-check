@@ -404,6 +404,7 @@ table.admin th { font-size: 12px; text-transform: uppercase; letter-spacing: .08
 .kind .n { font: 700 12px var(--f-mono); color: var(--accent); }
 .aud-row { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; margin-bottom: 14px; }
 .aud-row .hint:last-child { flex-basis: 100%; margin-top: 4px; }
+.aud-sep { width: 1px; height: 22px; background: var(--line); margin: 0 4px; }
 .deadline { color: var(--warn); font-weight: 600; }
 
 /* ---------- motion ---------- */
@@ -693,8 +694,9 @@ function audienceOf(text) {
 }
 
 // Unstop: India's student opportunity platform. Its public listing API (/api/public/, which its robots.txt allows)
-// gives each internship's company, stipend, deadline, skills and who may apply. Only work-from-home internships are kept.
+// gives each internship's company, stipend, deadline, skills and who may apply: work from home, hybrid and in office (with the city).
 // (Internshala's robots.txt blocks automated reading of its listings, so it is not imported.)
+const UNSTOP_WORKPLACE = { wfh: 'remote', hybrid: 'hybrid', in_office: 'office', on_field: 'field' };
 const UNSTOP_ELIGIBLE = { Undergraduate: 'ug', 'Engineering Students': 'ug', Postgraduate: 'pg', Management: 'mba', 'MBA Students': 'mba', All: 'ug,pg,mba' };
 const unstop = {
   key: 'unstop', label: 'Unstop', site: 'https://unstop.com/internships',
@@ -709,12 +711,17 @@ const unstop = {
       const jd = i.jobDetail || {};
       const eligible = (i.filters || []).filter(f => f.type === 'eligible').map(f => UNSTOP_ELIGIBLE[f.name]).filter(Boolean).join(',');
       const monthly = jd.pay_in === 'monthly' && jd.paid_unpaid !== 'unpaid' && !jd.not_disclosed;
+      const workplace = UNSTOP_WORKPLACE[jd.type] || 'office';
+      // Office and hybrid internships say where: "Mumbai, Pune, India". Abroad ones don't match the India filter and are skipped.
+      const places = (i.locations || []).filter(l => l.city);
+      const country = places[0]?.country || 'India';
+      const where = workplace === 'remote' ? 'India' : places.length ? `${[...new Set(places.map(l => l.city))].slice(0, 4).join(', ')}, ${country}` : 'India';
       return {
         company: i.organisation?.name, title: i.title, category: i.workfunction?.[0]?.name || 'Internship',
         description: htmlToText(i.details), kind: 'internship',
         audience: [...new Set(eligible.split(',').filter(Boolean))].join(','), unpaid: jd.paid_unpaid === 'unpaid',
         salary_min: monthly ? num(jd.min_salary) : null, salary_max: monthly ? num(jd.max_salary || jd.min_salary) : null, salary_currency: 'INR', pay_period: 'month',
-        location: 'India', remote: jd.type === 'wfh', apply_url: i.seo_url || `https://unstop.com/${i.public_url}`, external_id: `unstop-${i.id}`,
+        location: where, workplace, apply_url: i.seo_url || `https://unstop.com/${i.public_url}`, external_id: `unstop-${i.id}`,
         tags: (i.required_skills || []).map(x => x.skill_name || x.skill).slice(0, 5), deadline: i.end_date ? i.end_date.slice(0, 10) : null,
         posted_at: toIso(String(i.approved_date || i.updated_at || '').replace(/ GMT([+-]\d{2})(\d{2})$/, '$1:$2').replace(' ', 'T')),
       };
@@ -1263,7 +1270,7 @@ const READY = (async () => {
     const job = { id: j.id, company_id: c.id, title: j.title, segment, category: j.category || null, description: j.description || '',
       salary_min: j.salary_min || null, salary_max: j.salary_max || null, location: j.location || 'Worldwide', source: [...j.boards].join(', '),
       ...(j.kind === 'internship' || LIB.isInternship(j) ? { kind: 'internship', audience: j.audience || LIB.audienceOf(`${j.title} ${j.description || ''}`) } : { kind: 'job' }),
-      salary_currency: j.salary_currency || 'USD', pay_period: j.pay_period || 'year', deadline: j.deadline || null, unpaid: j.unpaid ? 1 : 0,
+      salary_currency: j.salary_currency || 'USD', pay_period: j.pay_period || 'year', deadline: j.deadline || null, unpaid: j.unpaid ? 1 : 0, workplace: j.workplace || 'remote',
       tags: (j.tags || []).join(','), posted_at: j.posted_at || new Date().toISOString(), apply_host: host };
     DATA.job[j.id] = { job, company: c.record, segment: SEG_INFO[segment], unlocked: c.report, locked: lockedOf(c.report), job_check: jobCheck, status };
     DATA.applyUrl[j.id] = j.apply_url;
@@ -1425,7 +1432,7 @@ window.fetch = async (url, opts = {}) => {
     const q = (u.searchParams.get('q') || '').toLowerCase(), seg = u.searchParams.get('segment'), cat = u.searchParams.get('category'), hq = (u.searchParams.get('hq') || '').toLowerCase();
     const jobs = DATA.list.jobs.filter(j => (!q || `${j.title} ${j.tags} ${j.company_name}`.toLowerCase().includes(q)) && (!seg || j.segment === seg) && (!cat || j.category === cat)
       && (!hq || (j.hq_country || '').toLowerCase() === hq)
-      && (!u.searchParams.get('kind') || j.kind === u.searchParams.get('kind')) && (!u.searchParams.get('audience') || `,${j.audience},`.includes(`,${u.searchParams.get('audience')},`)))
+      && (!u.searchParams.get('kind') || j.kind === u.searchParams.get('kind')) && (!u.searchParams.get('audience') || `,${j.audience},`.includes(`,${u.searchParams.get('audience')},`)) && (!u.searchParams.get('workplace') || (j.workplace || 'remote') === u.searchParams.get('workplace')))
       .map(j => ({ ...(covers(j.segment) ? j : hideSource(j)), match: matchOf(j) }));
     return reply(200, { ...DATA.list, jobs, companies: new Set(jobs.map(j => j.company_id)).size, internships: DATA.list.jobs.filter(j => j.kind === 'internship').length });
   }
@@ -1551,6 +1558,10 @@ function celebrate(el) {
   document.body.append(box); setTimeout(() => box.remove(), 1000);
 }
 const perMonth = n => { const r = n * state.fx / 12; return r >= 1e5 ? `₹${(r / 1e5).toFixed(1).replace(/\.0$/, '')}L` : `₹${Math.round(r / 1000)}k`; };
+// Where the work happens: jobs are remote; internships can also be hybrid or in an office ("In office · Pune")
+const WORKPLACE = { remote: 'Remote', hybrid: 'Hybrid', office: 'In office', field: 'On field' };
+const placeOf = j => !j.workplace || j.workplace === 'remote' ? remoteWhere(j.location)
+  : `${WORKPLACE[j.workplace]} · ${esc(String(j.location || 'India').replace(/,\s*India$/i, '') || 'India')}`;
 const freeN = () => state.trial?.limit ?? 2;   // free applications every new user gets
 const domainOf = url => { try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return ''; } };
 const params = () => new URLSearchParams(loc.hash.split('?')[1] || '');
@@ -1629,8 +1640,8 @@ function jobCard(j, saved, i = 0) {
       <button type="button" class="bookmark" data-save="${j.id}" aria-pressed="${isSaved}" aria-label="${isSaved ? 'Remove from saved jobs' : 'Save job'}: ${esc(j.title)}" title="${isSaved ? 'Saved' : 'Save job'}">${BOOKMARK}</button>
     </div>
     <div class="tags">
-      ${isFresh(j) ? '<span class="tag new">New for you</span>' : isNew(j) ? '<span class="tag new">New</span>' : ''}<span class="tag primary">${remoteWhere(j.location)}</span>${j.kind === 'internship' ? `<span class="tag intern">Internship</span>${audienceTags(j)}` : `<span class="tag seg">${SEG[j.segment]}</span>`}
-      ${workType(j) && j.kind !== 'internship' ? `<span class="tag">${workType(j)}</span>` : ''}${timeZone(j.location) ? `<span class="tag tz">${CLOCK}${timeZone(j.location)}</span>` : ''}
+      ${isFresh(j) ? '<span class="tag new">New for you</span>' : isNew(j) ? '<span class="tag new">New</span>' : ''}<span class="tag primary">${placeOf(j)}</span>${j.kind === 'internship' ? `<span class="tag intern">Internship</span>${audienceTags(j)}` : `<span class="tag seg">${SEG[j.segment]}</span>`}
+      ${workType(j) && j.kind !== 'internship' ? `<span class="tag">${workType(j)}</span>` : ''}${timeZone(j.location) && (!j.workplace || j.workplace === 'remote') ? `<span class="tag tz">${CLOCK}${timeZone(j.location)}</span>` : ''}
       ${skills.map(s => `<span class="tag">${esc(s)}</span>`).join('')}
       ${j.match != null ? `<span class="tag ${j.match >= 50 ? 'ok' : ''}">Skill match ${j.match}%</span>` : ''}
     </div>
@@ -1703,8 +1714,8 @@ async function jobsPage() {
   $app.innerHTML = `
     <section class="hero">
       <div>
-        <p class="eyebrow">${interns ? "For undergraduates, master's and MBA students · Work from home" : 'For Indian professionals · International &amp; Indian companies · Remote'}</p>
-        <h1>${interns ? 'Remote internships, <em>background-checked</em> before you apply.' : 'Every remote job, <em>background-checked</em> before you apply.'}</h1>
+        <p class="eyebrow">${interns ? "For undergraduates, master's and MBA students · Remote, hybrid and in office" : 'For Indian professionals · International &amp; Indian companies · Remote'}</p>
+        <h1>${interns ? 'Internships, <em>background-checked</em> before you apply.' : 'Every remote job, <em>background-checked</em> before you apply.'}</h1>
         <p class="lede">We check every listing for scam signs, how many roles the company is hiring for, how many job websites list it, how recent it is, and where the Apply link goes. You apply on the employer's page.</p>
         <p class="lede"><b>Your first ${freeN()} applications are free</b>, with the full background check. ${state.user ? '' : '<a href="#/signup">Create a free account</a>'}</p>
       </div>
@@ -1721,6 +1732,7 @@ async function jobsPage() {
     </div>
     <div class="aud-row" id="audRow" ${interns ? '' : 'hidden'}>
       <span class="hint">For</span>${[['', 'All students'], ['ug', 'Undergraduates'], ['pg', "Master's"], ['mba', 'MBA']].map(([k, l]) => `<button type="button" class="chip" data-aud="${k}" aria-pressed="${(p.get('audience') || '') === k}">${l}</button>`).join('')}
+      <span class="aud-sep" aria-hidden="true"></span><span class="hint">Where</span>${[['', 'Anywhere'], ['remote', 'Remote'], ['hybrid', 'Hybrid'], ['office', 'In office']].map(([k, l]) => `<button type="button" class="chip" data-wp="${k}" aria-pressed="${(p.get('workplace') || '') === k}">${l}</button>`).join('')}
       <span class="hint">Not on our list? <a href="https://internshala.com/internships/work-from-home-internships/" target="_blank" rel="noopener">Browse Internshala</a> and look the company up in <a href="#/check">Company check</a> first.</span>
     </div>
     <form class="toolbar" id="filters" role="search">
@@ -1745,7 +1757,7 @@ async function jobsPage() {
     <p class="sources" id="sources"></p>`;
 
   const f = $('#filters');
-  const filters = { q: p.get('q') || '', segment: p.get('segment') || '', category: p.get('category') || '', hq: p.get('hq') || '', saved: p.get('saved') || '', sort: p.get('sort') || '', fresh: p.get('fresh') || '', kind: p.get('kind') || '', audience: p.get('audience') || '' };
+  const filters = { q: p.get('q') || '', segment: p.get('segment') || '', category: p.get('category') || '', hq: p.get('hq') || '', saved: p.get('saved') || '', sort: p.get('sort') || '', fresh: p.get('fresh') || '', kind: p.get('kind') || '', audience: p.get('audience') || '', workplace: p.get('workplace') || '' };
   const update = () => {
     const qs = new URLSearchParams(Object.entries(filters).filter(([, v]) => v)).toString();
     loc._h = '#/' + (qs ? '?' + qs : '');
@@ -1761,9 +1773,14 @@ async function jobsPage() {
   f.category.addEventListener('change', () => { filters.category = f.category.value; update(); });
   // Jobs / Internships tabs, and who an internship is for
   $app.querySelectorAll('[data-kind]').forEach(b => b.addEventListener('click', () => {
-    filters.kind = b.dataset.kind; if (filters.kind !== 'internship') filters.audience = '';
+    filters.kind = b.dataset.kind; if (filters.kind !== 'internship') filters.audience = filters.workplace = '';
     const qs = new URLSearchParams(Object.entries(filters).filter(([, v]) => v)).toString();
     loc.hash = '#/' + (qs ? '?' + qs : '');   // re-render, so the heading matches
+  }));
+  $app.querySelectorAll('[data-wp]').forEach(b => b.addEventListener('click', () => {
+    filters.workplace = b.dataset.wp;
+    $app.querySelectorAll('[data-wp]').forEach(x => x.setAttribute('aria-pressed', x === b));
+    update();
   }));
   $app.querySelectorAll('[data-aud]').forEach(b => b.addEventListener('click', () => {
     filters.audience = b.dataset.aud;
@@ -1986,7 +2003,7 @@ function formatDesc(text) {
 function remoteGlance(j) {
   const tz = timeZone(j.location);
   return `<dl class="facts">
-    <div><dt>Work from</dt><dd>${remoteWhere(j.location).replace('Remote · ', '')}</dd></div>
+    <div><dt>Work from</dt><dd>${j.workplace && j.workplace !== 'remote' ? placeOf(j) : remoteWhere(j.location).replace('Remote · ', '')}</dd></div>
     <div><dt>Work type</dt><dd>${workType(j) || 'See posting'}</dd></div>
     <div><dt>Time zone</dt><dd>${tz || 'Ask the employer'}</dd></div>
     <div><dt>Pay a month</dt><dd>${j.unpaid ? 'Unpaid' : j.salary_min && isMonthlyInr(j) ? `${inr(j.salary_min)}${j.salary_max > j.salary_min ? ` – ${inr(j.salary_max)}` : ''}` : j.salary_min && state.fx ? `${perMonth(j.salary_min)} – ${perMonth(j.salary_max)}` : 'Not listed'}</dd></div>
@@ -2015,13 +2032,13 @@ async function jobPage(id) {
         <div class="job-hero-main">
           <p class="eyebrow">${j.kind === 'internship' ? 'Internship · ' : ''}${j.category ? esc(j.category) + ' · ' : ''}${esc(d.segment.name)} pass</p>
           <h1>${esc(j.title)}</h1>
-          <p class="co"><button type="button" class="linkbtn" data-company="${c.id}">${esc(c.name)}</button><span>${remoteWhere(j.location)}</span>
+          <p class="co"><button type="button" class="linkbtn" data-company="${c.id}">${esc(c.name)}</button><span>${placeOf(j)}</span>
             <span>Posted ${esc(ago(j.posted_at))}${j.source ? ` via ${esc(j.source)}` : ''}</span></p>
         </div>
         <div class="job-hero-score">${seal(d.report.score, d.report.level, 72)}${pill(d.report.level)}</div>
       </div>
-      <div class="tags">${isNew(j) ? '<span class="tag new">New</span>' : ''}<span class="tag primary">${remoteWhere(j.location)}</span>${j.kind === 'internship' ? `<span class="tag intern">Internship</span>${audienceTags(j)}` : ''}
-        ${workType(j) && j.kind !== 'internship' ? `<span class="tag">${workType(j)}</span>` : ''}${timeZone(j.location) ? `<span class="tag tz">${CLOCK}${timeZone(j.location)}</span>` : ''}
+      <div class="tags">${isNew(j) ? '<span class="tag new">New</span>' : ''}<span class="tag primary">${placeOf(j)}</span>${j.kind === 'internship' ? `<span class="tag intern">Internship</span>${audienceTags(j)}` : ''}
+        ${workType(j) && j.kind !== 'internship' ? `<span class="tag">${workType(j)}</span>` : ''}${timeZone(j.location) && (!j.workplace || j.workplace === 'remote') ? `<span class="tag tz">${CLOCK}${timeZone(j.location)}</span>` : ''}
         ${j.match != null ? `<span class="tag ${j.match >= 50 ? 'ok' : ''}">Skill match ${j.match}%</span>` : ''}</div>
       <div class="job-hero-foot">
         <div class="pay-big">${j.unpaid ? '<b>Unpaid internship</b><span>Ask about a certificate or a letter of recommendation</span>'
