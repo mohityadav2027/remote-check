@@ -644,7 +644,8 @@ const ats = {
       const jobs = await getJson(`https://api.lever.co/v0/postings/${encodeURIComponent(board)}?mode=json`);
       return jobs.map(j => ({
         company, title: j.text, category: j.categories?.team, description: j.descriptionPlain || htmlToText(j.description),
-        location: [j.categories?.location, ...(j.categories?.allLocations || [])].filter(Boolean).join(', ') || (j.workplaceType === 'remote' ? 'Remote' : ''),
+        location: [...new Set([j.categories?.location, ...(j.categories?.allLocations || [])].filter(Boolean))].join(' · ') || (j.workplaceType === 'remote' ? 'Remote' : ''),
+        workplace: j.workplaceType === 'hybrid' ? 'hybrid' : undefined,
         apply_url: j.hostedUrl, external_id: `lever-${board}-${j.id}`,
         remote: j.workplaceType === 'remote' || REMOTE.test(j.categories?.location || ''),
         tags: [j.categories?.commitment].filter(Boolean), posted_at: toIso(j.createdAt),
@@ -693,43 +694,12 @@ function audienceOf(text) {
   return [...out].join(',');
 }
 
-// Unstop: India's student opportunity platform. Its public listing API (/api/public/, which its robots.txt allows)
-// gives each internship's company, stipend, deadline, skills and who may apply: work from home, hybrid and in office (with the city).
-// (Internshala's robots.txt blocks automated reading of its listings, so it is not imported.)
-const UNSTOP_WORKPLACE = { wfh: 'remote', hybrid: 'hybrid', in_office: 'office', on_field: 'field' };
-const UNSTOP_ELIGIBLE = { Undergraduate: 'ug', 'Engineering Students': 'ug', Postgraduate: 'pg', Management: 'mba', 'MBA Students': 'mba', All: 'ug,pg,mba' };
-const unstop = {
-  key: 'unstop', label: 'Unstop', site: 'https://unstop.com/internships',
-  async fetch() {
-    const items = [];
-    for (let page = 1; page <= 8; page++) {
-      const d = (await getJson(`https://unstop.com/api/public/opportunity/search-result?opportunity=internships&oppstatus=open&per_page=100&page=${page}`)).data || {};
-      items.push(...(d.data || []));
-      if (!d.next_page_url) break;
-    }
-    return items.map(i => {
-      const jd = i.jobDetail || {};
-      const eligible = (i.filters || []).filter(f => f.type === 'eligible').map(f => UNSTOP_ELIGIBLE[f.name]).filter(Boolean).join(',');
-      const monthly = jd.pay_in === 'monthly' && jd.paid_unpaid !== 'unpaid' && !jd.not_disclosed;
-      const workplace = UNSTOP_WORKPLACE[jd.type] || 'office';
-      // Office and hybrid internships say where: "Mumbai, Pune, India". Abroad ones don't match the India filter and are skipped.
-      const places = (i.locations || []).filter(l => l.city);
-      const country = places[0]?.country || 'India';
-      const where = workplace === 'remote' ? 'India' : places.length ? `${[...new Set(places.map(l => l.city))].slice(0, 4).join(', ')}, ${country}` : 'India';
-      return {
-        company: i.organisation?.name, title: i.title, category: i.workfunction?.[0]?.name || 'Internship',
-        description: htmlToText(i.details), kind: 'internship',
-        audience: [...new Set(eligible.split(',').filter(Boolean))].join(','), unpaid: jd.paid_unpaid === 'unpaid',
-        salary_min: monthly ? num(jd.min_salary) : null, salary_max: monthly ? num(jd.max_salary || jd.min_salary) : null, salary_currency: 'INR', pay_period: 'month',
-        location: where, workplace, apply_url: i.seo_url || `https://unstop.com/${i.public_url}`, external_id: `unstop-${i.id}`,
-        tags: (i.required_skills || []).map(x => x.skill_name || x.skill).slice(0, 5), deadline: i.end_date ? i.end_date.slice(0, 10) : null,
-        posted_at: toIso(String(i.approved_date || i.updated_at || '').replace(/ GMT([+-]\d{2})(\d{2})$/, '$1:$2').replace(' ', 'T')),
-      };
-    }).filter(j => j.audience);   // open to students (not "experienced professionals only")
-  },
-};
+// Internships in offices in India (from company careers pages): the employer's own listing, in an Indian city
+const INDIA_PLACE = /india|bengaluru|bangalore|mumbai|delhi|gurugram|gurgaon|noida|pune|hyderabad|chennai|kolkata|ahmedabad|jaipur|kochi|chandigarh|indore/i;
+const internshipInIndia = j => isInternship(j) && INDIA_PLACE.test(j.location || '');
+const workplaceOf = j => j.remote !== false ? 'remote' : /hybrid/i.test(`${j.location} ${j.workplace || ''}`) ? 'hybrid' : 'office';
 
-const BOARDS = [remotive, himalayas, remoteok, jobicy, workingnomads, weworkremotely, unstop];
+const BOARDS = [remotive, himalayas, remoteok, jobicy, workingnomads, weworkremotely];
 
 // Remote only. The job boards above list nothing but remote jobs; company careers pages also list
 // office jobs, so those parsers set `remote`, and anything not marked remote (e.g. "Bengaluru office") is skipped.
@@ -995,8 +965,9 @@ function atsBoard(url) {
 }
 
 
-const INDIAN_COMPANIES = [{"name":"Razorpay","website":"https://razorpay.com","founded_year":2014,"hq_city":"Bengaluru","boards":["razorpay"]},{"name":"CRED","website":"https://cred.club","founded_year":2018,"hq_city":"Bengaluru","boards":["dreamplug"]},{"name":"Meesho","website":"https://www.meesho.com","founded_year":2015,"hq_city":"Bengaluru","boards":["meesho"]},{"name":"PhonePe","website":"https://www.phonepe.com","founded_year":2015,"hq_city":"Bengaluru","boards":["phonepe"]},{"name":"ShareChat","website":"https://sharechat.com","founded_year":2015,"hq_city":"Bengaluru","boards":["sharechat","mohallatech"]},{"name":"Paytm","website":"https://paytm.com","founded_year":2010,"hq_city":"Noida","boards":["paytm"]},{"name":"Groww","website":"https://groww.in","founded_year":2016,"hq_city":"Bengaluru","boards":["groww"]},{"name":"Swiggy","website":"https://www.swiggy.com","founded_year":2014,"hq_city":"Bengaluru","boards":["swiggy"]},{"name":"Dream Sports","website":"https://www.dreamsports.group","founded_year":2008,"hq_city":"Mumbai","boards":["dreamsports","dream11"]},{"name":"Unacademy","website":"https://unacademy.com","founded_year":2015,"hq_city":"Bengaluru","boards":["unacademy"]},{"name":"upGrad","website":"https://www.upgrad.com","founded_year":2015,"hq_city":"Mumbai","boards":["upgrad"]},{"name":"Juspay","website":"https://juspay.in","founded_year":2012,"hq_city":"Bengaluru","boards":["juspay"]},{"name":"Zeta","website":"https://www.zeta.tech","founded_year":2015,"hq_city":"Bengaluru","boards":["zetasuite"]},{"name":"InMobi","website":"https://www.inmobi.com","founded_year":2007,"hq_city":"Bengaluru","boards":["inmobi"]},{"name":"Urban Company","website":"https://www.urbancompany.com","founded_year":2014,"hq_city":"Gurugram","boards":["urbancompany","urbanclap"]},{"name":"Nykaa","website":"https://www.nykaa.com","founded_year":2012,"hq_city":"Mumbai","boards":["nykaa"]},{"name":"Ola","website":"https://www.olacabs.com","founded_year":2010,"hq_city":"Bengaluru","boards":["olacabs"]},{"name":"Spinny","website":"https://www.spinny.com","founded_year":2015,"hq_city":"Gurugram","boards":["spinny"]},{"name":"Slice","website":"https://www.sliceit.com","founded_year":2016,"hq_city":"Bengaluru","boards":["sliceit"]},{"name":"Jar","website":"https://www.myjar.app","founded_year":2021,"hq_city":"Bengaluru","boards":["myjar"]}];
-return { BOARDS, ats, INDIAN_COMPANIES, checkJob, isInternship, audienceOf, indiaEligible, classifySegment, textChecks, RED_FLAGS, hostOf, TRUSTED_APPLY_HOSTS, lookupCompany };
+const INDIAN_COMPANIES = [{"name":"Razorpay","website":"https://razorpay.com","founded_year":2014,"hq_city":"Bengaluru","boards":["razorpay"]},{"name":"CRED","website":"https://cred.club","founded_year":2018,"hq_city":"Bengaluru","boards":["dreamplug"]},{"name":"Meesho","website":"https://www.meesho.com","founded_year":2015,"hq_city":"Bengaluru","boards":["meesho"]},{"name":"PhonePe","website":"https://www.phonepe.com","founded_year":2015,"hq_city":"Bengaluru","boards":["phonepe"]},{"name":"ShareChat","website":"https://sharechat.com","founded_year":2015,"hq_city":"Bengaluru","boards":["sharechat","mohallatech"]},{"name":"Paytm","website":"https://paytm.com","founded_year":2010,"hq_city":"Noida","boards":["paytm"]},{"name":"Groww","website":"https://groww.in","founded_year":2016,"hq_city":"Bengaluru","boards":["groww"]},{"name":"Swiggy","website":"https://www.swiggy.com","founded_year":2014,"hq_city":"Bengaluru","boards":["swiggy"]},{"name":"Dream Sports","website":"https://www.dreamsports.group","founded_year":2008,"hq_city":"Mumbai","boards":["dreamsports","dream11"]},{"name":"Unacademy","website":"https://unacademy.com","founded_year":2015,"hq_city":"Bengaluru","boards":["unacademy"]},{"name":"upGrad","website":"https://www.upgrad.com","founded_year":2015,"hq_city":"Mumbai","boards":["upgrad"]},{"name":"Juspay","website":"https://juspay.in","founded_year":2012,"hq_city":"Bengaluru","boards":["juspay"]},{"name":"Zeta","website":"https://www.zeta.tech","founded_year":2015,"hq_city":"Bengaluru","boards":["zetasuite"]},{"name":"InMobi","website":"https://www.inmobi.com","founded_year":2007,"hq_city":"Bengaluru","boards":["inmobi"]},{"name":"Urban Company","website":"https://www.urbancompany.com","founded_year":2014,"hq_city":"Gurugram","boards":["urbancompany","urbanclap"]},{"name":"Nykaa","website":"https://www.nykaa.com","founded_year":2012,"hq_city":"Mumbai","boards":["nykaa"]},{"name":"Ola","website":"https://www.olacabs.com","founded_year":2010,"hq_city":"Bengaluru","boards":["olacabs"]},{"name":"Spinny","website":"https://www.spinny.com","founded_year":2015,"hq_city":"Gurugram","boards":["spinny"]},{"name":"Slice","website":"https://www.sliceit.com","founded_year":2016,"hq_city":"Bengaluru","boards":["sliceit"]},{"name":"FamPay","website":"https://famapp.in","founded_year":2019,"hq_city":"Bengaluru","boards":["fampay"]},{"name":"Jar","website":"https://www.myjar.app","founded_year":2021,"hq_city":"Bengaluru","boards":["myjar"]}];
+const CAREERS_COMPANIES = [{"name":"Stripe","website":"https://stripe.com","founded_year":2010,"hq_country":"USA","hq_city":"South San Francisco","ats_type":"greenhouse","ats_board":"stripe"},{"name":"Rubrik","website":"https://www.rubrik.com","founded_year":2014,"hq_country":"USA","hq_city":"Palo Alto","ats_type":"greenhouse","ats_board":"rubrik"}];
+return { BOARDS, ats, INDIAN_COMPANIES, CAREERS_COMPANIES, checkJob, isInternship, internshipInIndia, workplaceOf, audienceOf, indiaEligible, classifySegment, textChecks, RED_FLAGS, hostOf, TRUSTED_APPLY_HOSTS, lookupCompany };
 })();</script>
 <script>// Full company profile from public records, for the "Company check" page: type a company's name, pick it,
 // and see when it was founded, who founded and runs it, where it's based, how many people work there,
@@ -1178,10 +1149,15 @@ const READY = (async () => {
     }
     return null;
   }));
-  const indianOpen = indian.filter(Boolean).flatMap(x => x.jobs.filter(j => j.title && /^https?:\/\//.test(j.apply_url || '') && LIB.indiaEligible(j))
+  // Well-known companies with Indian offices: their careers pages are known
+  const global = await Promise.all(LIB.CAREERS_COMPANIES.map(async c => {
+    try { return { c, label: `${c.name} careers page`, jobs: await withTimeout(LIB.ats[c.ats_type].fetch(c.ats_board, c.name), 15000) }; } catch { return null; }
+  }));
+  // Remote jobs open to India, plus internships in Indian offices (in office or hybrid)
+  const indianOpen = [...indian, ...global].filter(Boolean).flatMap(x => x.jobs.filter(j => j.title && /^https?:\/\//.test(j.apply_url || '') && (LIB.indiaEligible(j) || LIB.internshipInIndia(j)))
     .map(j => ({ ...j, source: 'careers', board: x.label })));
   raw.unshift(...indianOpen);   // the employer's own listing wins over a job-board copy
-  DATA.sources.push({ label: 'Indian company careers pages', site: null, open: indianOpen.length, ok: true });
+  DATA.sources.push({ label: 'Company careers pages', site: null, open: indianOpen.length, ok: true });
   if (!raw.length) throw new Error('no jobs');
 
   // 2. The same job listed on several boards counts once; remember which boards list it
@@ -1211,9 +1187,9 @@ const READY = (async () => {
       const c = list4[next++];
       try { c.details = await withTimeout(LIB.lookupCompany(c.name), 15000); } catch { c.details = null; }
       // Indian companies on our list: use the details we keep for them where Wikidata has none
-      const ours = LIB.INDIAN_COMPANIES.find(x => x.name.toLowerCase() === c.name.toLowerCase());
-      if (ours) c.details = { employee_count: null, linkedin_url: null, description: null, ...(c.details || {}),
-        founded_year: c.details?.founded_year || ours.founded_year, website: c.details?.website || ours.website, hq_country: 'India', hq_city: ours.hq_city };
+      const ours = [...LIB.INDIAN_COMPANIES.map(x => ({ ...x, hq_country: 'India' })), ...LIB.CAREERS_COMPANIES].find(x => x.name.toLowerCase() === c.name.toLowerCase());
+      if (ours) c.details = { employee_count: null, linkedin_url: null, description: null, from_team: !c.details, ...(c.details || {}),
+        founded_year: c.details?.founded_year || ours.founded_year, website: c.details?.website || ours.website, hq_country: c.details?.hq_country || ours.hq_country, hq_city: ours.hq_city };
     }
   }));
 
@@ -1249,7 +1225,7 @@ const READY = (async () => {
     c.report = { score, level: level(score), signals, stats: c.stats };
     c.record = d
       ? { id: c.id, name: c.name, website: d.website, linkedin_url: d.linkedin_url, founded_year: d.founded_year, employee_count: d.employee_count,
-          hq_country: d.hq_country, hq_city: d.hq_city || null, description: d.description, info_source: 'wikidata', wikidata_id: d.wikidata_id }
+          hq_country: d.hq_country, hq_city: d.hq_city || null, description: d.description, info_source: d.from_team ? 'team' : 'wikidata', wikidata_id: d.wikidata_id }
       : { id: c.id, name: c.name, feed: true, website: null, linkedin_url: null, founded_year: null, employee_count: null, hq_country: null,
           description: `Hiring on ${[...boards].join(', ')}.` };
     c.missing = d ? [] : ['founding year', 'website'];
@@ -1270,7 +1246,7 @@ const READY = (async () => {
     const job = { id: j.id, company_id: c.id, title: j.title, segment, category: j.category || null, description: j.description || '',
       salary_min: j.salary_min || null, salary_max: j.salary_max || null, location: j.location || 'Worldwide', source: [...j.boards].join(', '),
       ...(j.kind === 'internship' || LIB.isInternship(j) ? { kind: 'internship', audience: j.audience || LIB.audienceOf(`${j.title} ${j.description || ''}`) } : { kind: 'job' }),
-      salary_currency: j.salary_currency || 'USD', pay_period: j.pay_period || 'year', deadline: j.deadline || null, unpaid: j.unpaid ? 1 : 0, workplace: j.workplace || 'remote',
+      salary_currency: j.salary_currency || 'USD', pay_period: j.pay_period || 'year', deadline: j.deadline || null, unpaid: j.unpaid ? 1 : 0, workplace: j.kind === 'internship' || LIB.isInternship(j) ? (j.workplace || LIB.workplaceOf(j)) : 'remote',
       tags: (j.tags || []).join(','), posted_at: j.posted_at || new Date().toISOString(), apply_host: host };
     DATA.job[j.id] = { job, company: c.record, segment: SEG_INFO[segment], unlocked: c.report, locked: lockedOf(c.report), job_check: jobCheck, status };
     DATA.applyUrl[j.id] = j.apply_url;
@@ -1513,7 +1489,7 @@ const inr = n => '₹' + Math.round(n).toLocaleString('en-IN');
 const parseDate = d => new Date(String(d).includes('T') ? d : String(d).replace(' ', 'T') + 'Z');
 const fmtDate = d => (d ? parseDate(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '');
 const ago = d => { const days = Math.floor((Date.now() - parseDate(d)) / 864e5); return days <= 0 ? 'today' : days === 1 ? '1 day ago' : `${days} days ago`; };
-// Pay: jobs are in US dollars a year; internship stipends (e.g. from Unstop) in rupees a month
+// Pay: jobs are in US dollars a year; internship stipends can be in rupees a month
 const isMonthlyInr = j => j.salary_currency === 'INR';
 const salary = j => j.unpaid ? 'Unpaid' : !j.salary_min ? 'Pay not listed'
   : isMonthlyInr(j) ? `₹${Math.round(j.salary_min / 1000)}k–₹${Math.round(j.salary_max / 1000)}k / month` : `$${Math.round(j.salary_min / 1000)}k–$${Math.round(j.salary_max / 1000)}k / yr`;
