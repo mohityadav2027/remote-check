@@ -35,19 +35,6 @@ const FIXTURES = {
     { url: 'https://www.workingnomads.com/jobs/qa-tester', title: 'QA Tester', description: 'Test apps', company_name: 'TestLab',
       category_name: 'Development', tags: 'qa,testing', location: 'Anywhere', pub_date: '2026-10-23T08:00:00-04:00' },
   ],
-  'unstop.com': { data: { next_page_url: null, data: [
-    { id: 9001, title: 'Marketing Internship', seo_url: 'https://unstop.com/internships/marketing-internship-acme-9001', organisation: { name: 'Acme' },
-      workfunction: [{ name: 'Marketing' }], details: '<p><strong>Responsibilities:</strong></p><ul><li>Plan social posts</li></ul>',
-      jobDetail: { type: 'wfh', paid_unpaid: 'paid', pay_in: 'monthly', min_salary: 8000, max_salary: 12000 },
-      filters: [{ type: 'eligible', name: 'Undergraduate' }, { type: 'eligible', name: 'Management' }],
-      required_skills: [{ skill_name: 'Social Media' }], end_date: '2099-12-31T00:00:00+05:30', approved_date: '2026-11-16 09:46:50 GMT+0530' },
-    { id: 9002, title: 'Sales Internship', seo_url: 'https://unstop.com/internships/sales-internship-acme-9002', organisation: { name: 'Acme' },
-      details: 'Sell things', jobDetail: { type: 'in_office', paid_unpaid: 'unpaid' }, filters: [{ type: 'eligible', name: 'Postgraduate' }],
-      locations: [{ city: 'Pune', country: 'India' }, { city: 'Mumbai', country: 'India' }],
-      required_skills: [], end_date: '2099-12-31T00:00:00+05:30', approved_date: '2026-11-16 09:46:50 GMT+0530' },
-    { id: 9003, title: 'Senior Analyst Internship', seo_url: 'https://unstop.com/internships/x-9003', organisation: { name: 'Acme' },
-      details: 'x', jobDetail: { type: 'wfh' }, filters: [{ type: 'eligible', name: 'Experienced Professionals' }], required_skills: [] },
-  ] } },
   'weworkremotely.com': `<?xml version="1.0"?><rss><channel>
     <item><title>Globex: Virtual Assistant</title><region>Anywhere in the World</region><category>Customer Support</category>
       <description>&lt;p&gt;Manage calendars&lt;/p&gt;</description><pubDate>Thu, 24 Oct 2026 10:00:00 +0000</pubDate>
@@ -310,18 +297,14 @@ test('company profile from Wikidata: details and what they tell a job seeker', (
   assert.equal(closed[0].level, 'bad');
 });
 
-test('internships: Unstop work-from-home internships for students, who they are for, and the stipend', async () => {
-  const { isInternship, audienceOf } = require('../lib/sources');
-  const list = await BOARDS.find(b => b.key === 'unstop').fetch();
-  assert.equal(list.length, 2, 'experienced-professionals-only internship dropped');
-  const mk = list.find(j => j.external_id === 'unstop-9001');
-  assert.equal(mk.audience, 'ug,mba'); assert.equal(mk.salary_min, 8000); assert.equal(mk.pay_period, 'month'); assert.equal(mk.salary_currency, 'INR');
-  assert.ok(indiaEligible(mk), 'remote internship kept');
-  const office = list.find(j => j.external_id === 'unstop-9002');
-  assert.equal(office.workplace, 'office'); assert.equal(office.location, 'Pune, Mumbai, India'); assert.ok(office.unpaid);
-  assert.ok(indiaEligible(office), 'office internship in India kept');
-  assert.equal(mk.workplace, 'remote');
-  assert.ok(!indiaEligible({ location: 'London, United Kingdom', workplace: 'office' }), 'office internship abroad skipped');
+test('internships: office internships in India from careers pages, who they are for', () => {
+  const { isInternship, internshipInIndia, workplaceOf, audienceOf } = require('../lib/sources');
+  assert.ok(internshipInIndia({ title: 'Software Engineer, Intern', location: 'Bengaluru', remote: false }));
+  assert.ok(!internshipInIndia({ title: 'Product Design Intern (USA)', location: 'San Francisco, CA, US; Remote, US' }), 'US internship skipped');
+  assert.ok(!internshipInIndia({ title: 'Account Executive', location: 'Bengaluru', remote: false }), 'office jobs stay out');
+  assert.equal(workplaceOf({ location: 'Bengaluru', remote: false }), 'office');
+  assert.equal(workplaceOf({ location: 'Pune (Hybrid)', remote: false }), 'hybrid');
+  assert.equal(workplaceOf({ location: 'Remote - India', remote: true }), 'remote');
   assert.ok(isInternship({ title: 'Product Management Intern' }) && !isInternship({ title: 'Internal Auditor' }));
   assert.equal(audienceOf('Open to MBA and PGDM students'), 'mba');
   assert.equal(audienceOf('Final-year B.Tech students'), 'ug');

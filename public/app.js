@@ -13,7 +13,7 @@ const inr = n => '₹' + Math.round(n).toLocaleString('en-IN');
 const parseDate = d => new Date(String(d).includes('T') ? d : String(d).replace(' ', 'T') + 'Z');
 const fmtDate = d => (d ? parseDate(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '');
 const ago = d => { const days = Math.floor((Date.now() - parseDate(d)) / 864e5); return days <= 0 ? 'today' : days === 1 ? '1 day ago' : `${days} days ago`; };
-// Pay: jobs are in US dollars a year; internship stipends (e.g. from Unstop) in rupees a month
+// Pay: jobs are in US dollars a year; internship stipends can be in rupees a month
 const isMonthlyInr = j => j.salary_currency === 'INR';
 const salary = j => j.unpaid ? 'Unpaid' : !j.salary_min ? 'Pay not listed'
   : isMonthlyInr(j) ? `₹${Math.round(j.salary_min / 1000)}k–₹${Math.round(j.salary_max / 1000)}k / month` : `$${Math.round(j.salary_min / 1000)}k–$${Math.round(j.salary_max / 1000)}k / yr`;

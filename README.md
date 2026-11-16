@@ -34,10 +34,10 @@ The score runs from 0 to 100: **Verified** is 70 or more, **Check carefully** is
 - Jobs from companies without details aren't shown. The jobs page counts them ("N more jobs not posted yet"), and their job page explains why.
 
 ## Internships
-- **Internships** (top menu, or the Jobs / Internships tabs): remote internships for undergraduates, master's and MBA students, with the stipend in rupees a month, who can apply and the application deadline. Filter by Undergraduates, Master's or MBA.
-- From **Unstop**'s public listing API (its robots.txt allows `/api/public/`), plus any job titled "intern" on the other job sites. Remote, hybrid and in-office internships in India that are open to students are imported (office ones show the city), with a Remote / Hybrid / In office filter. They close on their deadline. Jobs stay remote-only.
-- They pass the same checks as jobs: scam signs (fees, WhatsApp/Telegram recruiters, asking for ID or bank details), and the company must have a founding year and website on record (or added by you in Admin) before it is posted.
-- **Internshala** is not imported: its robots.txt blocks automated reading of its listings. The Internships page links to it and suggests checking the company in Company check.
+- **Internships** (top menu, or the Jobs / Internships tabs): for undergraduates, master's and MBA students, with who can apply, the stipend when listed, and where (Remote / Hybrid / In office filter).
+- From **company careers pages** (Greenhouse, Lever, Ashby): internships in the company's Indian offices, straight from the employer. Companies are in `lib/careers-companies.js` (e.g. Stripe, Rubrik) and `lib/indian-companies.js` (e.g. Paytm, FamPay). Add more from Admin → Add company with a careers page link. Also any remote job titled intern / trainee / apprentice on the job sites.
+- Same checks as jobs: scam signs, and the company must have a founding year and website on record before anything is posted. Jobs (not internships) stay remote-only.
+- **Not imported**: Unstop (nearly all of its internship companies have no public record we can verify: 1 of 137 checked) and Internshala (its robots.txt blocks automated reading). The Internships page links to Internshala and suggests checking the company in Company check.
 
 ## Company check
 - **Company check** (top menu): type any company's name and pick it from the list to see its full public profile: founding date, founders, CEO, headquarters, employees, industry, stock listing, parent company, website age, LinkedIn, and a plain description from Wikipedia. It also shows the company's jobs on Parakh and its trust score.
