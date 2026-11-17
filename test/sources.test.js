@@ -35,6 +35,16 @@ const FIXTURES = {
     { url: 'https://www.workingnomads.com/jobs/qa-tester', title: 'QA Tester', description: 'Test apps', company_name: 'TestLab',
       category_name: 'Development', tags: 'qa,testing', location: 'Anywhere', pub_date: '2026-10-23T08:00:00-04:00' },
   ],
+  // SmartRecruiters: one body serves both the list (content) and a posting's details (jobAd, postingUrl)
+  'api.smartrecruiters.com': { totalFound: 3, content: [
+    { id: '111', name: 'Marketing Intern', typeOfEmployment: { id: 'intern', label: 'Internship' }, location: { city: 'Mumbai', fullLocation: 'Mumbai, MH, India', remote: false, hybrid: true }, releasedDate: '2026-11-16T07:07:50.860Z', function: { label: 'Marketing' } },
+    { id: '112', name: 'Support Engineer', typeOfEmployment: { id: 'permanent' }, location: { city: 'Pune', fullLocation: 'Pune, MH, India', remote: true }, releasedDate: '2026-11-16T07:07:50.860Z' },
+    { id: '113', name: 'Plant Manager', typeOfEmployment: { id: 'permanent' }, location: { city: 'Nashik', fullLocation: 'Nashik, MH, India', remote: false }, releasedDate: '2026-11-16T07:07:50.860Z' },
+  ], jobAd: { sections: { jobDescription: { text: '<p>Plan <b>campaigns</b></p>' }, qualifications: { text: '<ul><li>BBA or MBA students</li></ul>' } } }, postingUrl: 'https://jobs.smartrecruiters.com/acme/111-marketing-intern' },
+  'apply.workable.com': { jobs: [
+    { title: 'Design Intern', shortcode: 'AB12', city: 'Bengaluru', country: 'India', telecommuting: false, url: 'https://apply.workable.com/acme/j/AB12/', description: '<p>Design screens</p>', published_on: '2026-11-15' },
+    { title: 'Backend Engineer', shortcode: 'CD34', country: 'India', telecommuting: true, url: 'https://apply.workable.com/acme/j/CD34/', description: '<p>APIs</p>', published_on: '2026-11-15' },
+  ] },
   'weworkremotely.com': `<?xml version="1.0"?><rss><channel>
     <item><title>Globex: Virtual Assistant</title><region>Anywhere in the World</region><category>Customer Support</category>
       <description>&lt;p&gt;Manage calendars&lt;/p&gt;</description><pubDate>Thu, 24 Oct 2026 10:00:00 +0000</pubDate>
@@ -63,7 +73,7 @@ const FIXTURES = {
 };
 
 // Careers pages answer only for the companies that have one; any other name is "404 not found"
-const ATS_BOARDS = { 'boards-api.greenhouse.io': ['gitlab'], 'api.lever.co': ['acme'], 'api.ashbyhq.com': ['ramp'] };
+const ATS_BOARDS = { 'boards-api.greenhouse.io': ['gitlab'], 'api.lever.co': ['acme'], 'api.ashbyhq.com': ['ramp'], 'api.smartrecruiters.com': ['acme'], 'apply.workable.com': ['acme'] };
 global.fetch = async url => {
   const { hostname: host, pathname } = new URL(url);
   if (host in ATS_BOARDS && !ATS_BOARDS[host].some(b => pathname.split('/').includes(b))) return { ok: false, status: 404, json: async () => ({}), text: async () => '' };
@@ -309,4 +319,19 @@ test('internships: office internships in India from careers pages, who they are 
   assert.equal(audienceOf('Open to MBA and PGDM students'), 'mba');
   assert.equal(audienceOf('Final-year B.Tech students'), 'ug');
   assert.equal(audienceOf('Help our team'), 'ug,pg');
+});
+
+test('SmartRecruiters and Workable careers pages: Indian internships and remote roles', async () => {
+  const { internshipInIndia } = require('../lib/sources');
+  const sr = await ats.smartrecruiters.fetch('acme', 'Acme');
+  assert.deepEqual(sr.map(j => j.title), ['Marketing Intern', 'Support Engineer'], 'office non-internship roles are not read');
+  const mi = sr[0];
+  assert.equal(mi.kind, 'internship'); assert.equal(mi.workplace, 'hybrid'); assert.equal(mi.apply_url, 'https://jobs.smartrecruiters.com/acme/111-marketing-intern');
+  assert.match(mi.description, /Plan campaigns/); assert.match(mi.description, /BBA or MBA/);
+  assert.ok(internshipInIndia(mi)); assert.ok(indiaEligible(sr[1]), 'remote role in India kept');
+  const wk = await ats.workable.fetch('acme', 'Acme');
+  assert.ok(internshipInIndia(wk.find(j => j.title === 'Design Intern')));
+  assert.ok(indiaEligible(wk.find(j => j.title === 'Backend Engineer')));
+  assert.deepEqual(parseCareersUrl('https://jobs.smartrecruiters.com/BoschGroup'), { type: 'smartrecruiters', board: 'BoschGroup' });
+  assert.deepEqual(parseCareersUrl('https://apply.workable.com/acme/'), { type: 'workable', board: 'acme' });
 });

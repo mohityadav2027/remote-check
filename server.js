@@ -475,7 +475,7 @@ app.post('/api/admin/companies', admin, ah(async (req, res) => {
   const b = req.body || {};
   if (!b.name) return res.status(400).json({ error: 'Name required' });
   const careers = b.careers_url ? parseCareersUrl(b.careers_url) : null;
-  if (b.careers_url && !careers) return res.status(400).json({ error: 'Careers link must be a Greenhouse, Lever or Ashby job board, e.g. https://jobs.lever.co/company' });
+  if (b.careers_url && !careers) return res.status(400).json({ error: 'Careers link must be a Greenhouse, Lever, Ashby, SmartRecruiters or Workable job board, e.g. https://jobs.lever.co/company' });
   const reg = parseRegistration(b.cin);
   if (reg && !reg.valid) return res.status(400).json({ error: 'That isn\'t a valid CIN (e.g. U72900KA2013PTC123456) or LLPIN (e.g. AAB-1234). Copy it from mca.gov.in.' });
   // A blank box keeps what's already saved (e.g. details found on Wikidata) instead of wiping it

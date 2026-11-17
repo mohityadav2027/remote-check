@@ -1,0 +1,51 @@
+# Rebuilds the GitHub Pages site every 10 hours with fresh jobs and internships:
+# fetches every job site and careers page, checks every company and post, and publishes
+# index.html + data.json to the gh-pages branch. Also runs when the site's code changes,
+# and by hand from the Actions tab ("Run workflow").
+name: Refresh jobs
+
+on:
+  schedule:
+    - cron: '23 */10 * * *'
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: refresh-jobs
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - run: npm ci --omit=dev
+
+      - name: Build the page
+        run: node --no-warnings preview/build.js preview/out
+
+      - name: Collect and check jobs and internships
+        run: node --no-warnings preview/data.js preview/out/data.json
+
+      - name: Publish to GitHub Pages
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git fetch --depth=1 origin gh-pages
+          git worktree add pages origin/gh-pages
+          cp preview/out/index.html preview/out/data.json pages/
+          cd pages
+          git add index.html data.json
+          git diff --cached --quiet && { echo "Nothing changed"; exit 0; }
+          git commit -m "Refresh jobs and internships"
+          git push origin HEAD:gh-pages

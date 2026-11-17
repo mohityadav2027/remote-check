@@ -35,9 +35,15 @@ The score runs from 0 to 100: **Verified** is 70 or more, **Check carefully** is
 
 ## Internships
 - **Internships** (top menu, or the Jobs / Internships tabs): for undergraduates, master's and MBA students, with who can apply, the stipend when listed, and where (Remote / Hybrid / In office filter).
-- From **company careers pages** (Greenhouse, Lever, Ashby): internships in the company's Indian offices, straight from the employer. Companies are in `lib/careers-companies.js` (e.g. Stripe, Rubrik) and `lib/indian-companies.js` (e.g. Paytm, FamPay). Add more from Admin → Add company with a careers page link. Also any remote job titled intern / trainee / apprentice on the job sites.
+- From **company careers pages** (Greenhouse, Lever, Ashby, SmartRecruiters, Workable): internships in the company's Indian offices, straight from the employer. Companies are in `lib/careers-companies.js` (e.g. Stripe, Rubrik, Bosch, ServiceNow, Freshworks) and `lib/indian-companies.js` (e.g. Paytm, FamPay, Swiggy). Add more from Admin → Add company with a careers page link. Also any remote job titled intern / trainee / apprentice on the job sites.
 - Same checks as jobs: scam signs, and the company must have a founding year and website on record before anything is posted. Jobs (not internships) stay remote-only.
 - **Not imported**: Unstop (nearly all of its internship companies have no public record we can verify: 1 of 137 checked) and Internshala (its robots.txt blocks automated reading). The Internships page links to Internshala and suggests checking the company in Company check.
+
+## GitHub Pages version (no server)
+- `preview/` builds a static version of the site for GitHub Pages: `node preview/build.js preview/out` makes `index.html`, and `node preview/data.js preview/out/data.json` collects and checks every job and internship (the same checks as the server) into one file.
+- `.github/workflows/refresh-jobs.yml` runs both every 10 hours (and whenever `main` changes) and publishes them to the `gh-pages` branch, so the page shows jobs in about a second. Run it by hand from the repository's **Actions** tab → *Refresh jobs* → *Run workflow*.
+- If `data.json` is missing or more than 3 days old, the page falls back to fetching the job sites in the visitor's browser (slow, about a minute).
+- Sign-up and payments on this version are a demo; the real ones need the server (`server.js`) deployed.
 
 ## Company check
 - **Company check** (top menu): type any company's name and pick it from the list to see its full public profile: founding date, founders, CEO, headquarters, employees, industry, stock listing, parent company, website age, LinkedIn, and a plain description from Wikipedia. It also shows the company's jobs on Parakh and its trust score.
