@@ -489,6 +489,9 @@ header.bar.scrolled { box-shadow: 0 6px 20px -12px rgb(8 14 24 / .35); }
 
 // Indian cities count too: a remote job tied to Bengaluru or Pune is open to people in India
 const INDIA_OK = /worldwide|anywhere|global|india|asia|apac|\bremote\s*$|bengaluru|bangalore|mumbai|delhi|gurugram|gurgaon|noida|pune|hyderabad|chennai|kolkata|ahmedabad|jaipur|kochi/i;
+// A plain "Remote" counts as open to India, but not when it's tied to another country or city ("US-Remote", "Chicago, Remote")
+const OPEN_TO_INDIA = /worldwide|anywhere|global|india|asia|apac|bengaluru|bangalore|mumbai|delhi|gurugram|gurgaon|noida|pune|hyderabad|chennai|kolkata|ahmedabad|jaipur|kochi/i;
+const OTHER_PLACE = /\b(us|usa|u\.s\.?|united states|america|americas|north america|canada|ca|uk|united kingdom|england|europe|eu|emea|latam|mexico|brazil|poland|romania|germany|france|spain|portugal|ireland|netherlands|london|dublin|toronto|vancouver|sf|san francisco|seattle|new york|nyc|ny|chicago|atlanta|austin|boston|denver|texas|california)\b/i;
 const REMOTE = /remote|anywhere|work from home|\bwfh\b|distributed/i;
 
 const stripHtml = s => (s || '')
@@ -754,7 +757,10 @@ const BOARDS = [remotive, himalayas, remoteok, jobicy, workingnomads, weworkremo
 
 // Remote only. The job boards above list nothing but remote jobs; company careers pages also list
 // office jobs, so those parsers set `remote`, and anything not marked remote (e.g. "Bengaluru office") is skipped.
-const indiaEligible = job => job.remote !== false && INDIA_OK.test(job.location || '');
+const indiaEligible = job => {
+  const loc = job.location || '';
+  return job.remote !== false && (OPEN_TO_INDIA.test(loc) || (/\bremote\s*$/i.test(loc) && !OTHER_PLACE.test(loc)));
+};
 
 
 // Segment-based pricing: $2 – $4 per 30 days, charged in INR at the live exchange rate.
@@ -1523,7 +1529,7 @@ document.addEventListener('click', e => {
 }, true);
 
 // Navigation inside the preview: keep the route in memory (artifact links only carry a plain #name).
-const loc = { _h: '#/', get hash() { return this._h; }, set hash(v) { this._h = v; route(); } };
+const loc = { _h: (typeof location !== 'undefined' && location.hash.length > 1) ? location.hash : '#/', get hash() { return this._h; }, set hash(v) { this._h = v; route(); } };
 document.addEventListener('click', e => {
   const a = e.target.closest('a[href^="#"]');
   if (a && !a.classList.contains('skip-link')) { e.preventDefault(); loc.hash = a.getAttribute('href'); }
