@@ -178,7 +178,7 @@ document.addEventListener('click', e => {
 }, true);
 
 // Navigation inside the preview: keep the route in memory (artifact links only carry a plain #name).
-const loc = { _h: '#/', get hash() { return this._h; }, set hash(v) { this._h = v; route(); } };
+const loc = { _h: (typeof location !== 'undefined' && location.hash.length > 1) ? location.hash : '#/', get hash() { return this._h; }, set hash(v) { this._h = v; route(); } };
 document.addEventListener('click', e => {
   const a = e.target.closest('a[href^="#"]');
   if (a && !a.classList.contains('skip-link')) { e.preventDefault(); loc.hash = a.getAttribute('href'); }

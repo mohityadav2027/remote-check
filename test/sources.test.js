@@ -109,9 +109,9 @@ test('company career pages (Greenhouse, Lever, Ashby) parse', async () => {
 });
 
 test('only jobs open to India / worldwide / Asia are kept', () => {
-  for (const loc of ['Worldwide', 'Anywhere in the World', 'India', 'APAC', 'Remote, APAC', 'Remote', 'Asia'])
+  for (const loc of ['Worldwide', 'Anywhere in the World', 'India', 'APAC', 'Remote, APAC', 'Remote', 'Asia', 'Europe, LATAM, APAC, the U.S., Canada', 'Brazil, India, United Kingdom, United States'])
     assert.ok(indiaEligible({ location: loc }), loc);
-  for (const loc of ['USA Only', 'Europe', 'Remote, US', 'Remote - Canada', ''])
+  for (const loc of ['USA Only', 'Europe', 'Remote, US', 'Remote - Canada', '', 'US-Remote', 'Chicago, Remote', 'San Francisco, Seattle, US-Remote', 'Poland - Remote OR Romania - Remote', 'US; Remote'])
     assert.ok(!indiaEligible({ location: loc }), loc);
 });
 
