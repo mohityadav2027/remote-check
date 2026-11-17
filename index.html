@@ -453,7 +453,7 @@ header.bar.scrolled { box-shadow: 0 6px 20px -12px rgb(8 14 24 / .35); }
 </style>
 </head>
 <body>
-<div class="preview-bar"><b>Live jobs:</b> real remote jobs open to India, loaded from public job websites when you open this page. Apply opens the real posting. Sign-up and payments here are a demo.</div>
+<div class="preview-bar"><b>Live jobs:</b> real remote jobs and internships open to India, collected from public job websites and company careers pages every 10 hours. Apply opens the real posting. Sign-up and payments here are a demo.</div>
 
   <a class="skip-link" href="#app">Skip to content</a>
   <header class="bar">
@@ -478,7 +478,7 @@ header.bar.scrolled { box-shadow: 0 6px 20px -12px rgb(8 14 24 / .35); }
   </div>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
   
-<script>const DATA = { pricing: {"fx_rate":84,"fx_source":"fallback","days":30,"segments":[{"key":"basic","name":"Entry","usd":2,"rank":1,"covers":"Entry-level work: customer support, data entry, virtual assistant, AI data annotation, transcription, moderation, tutoring, content writing","inr":168},{"key":"pro","name":"Professional","usd":3,"rank":2,"covers":"Everything in Entry + managers and supervisors, developers, design, video, marketing, social media, sales, finance, accounting, HR, legal, translation, QA","inr":252},{"key":"premium","name":"Senior & Specialist","usd":4,"rank":3,"covers":"Everything + senior managers, heads, directors and VPs, product and engineering managers, architects, AI/ML, data science, DevOps, security","inr":336}],"payments":"demo"} };</script>
+<script>const DATA = { pricing: {"fx_rate":93.959855,"fx_source":"open.er-api.com","days":30,"segments":[{"key":"basic","name":"Entry","usd":2,"rank":1,"covers":"Entry-level work: customer support, data entry, virtual assistant, AI data annotation, transcription, moderation, tutoring, content writing","inr":188},{"key":"pro","name":"Professional","usd":3,"rank":2,"covers":"Everything in Entry + managers and supervisors, developers, design, video, marketing, social media, sales, finance, accounting, HR, legal, translation, QA","inr":282},{"key":"premium","name":"Senior & Specialist","usd":4,"rank":3,"covers":"Everything + senior managers, heads, directors and VPs, product and engineering managers, architects, AI/ML, data science, DevOps, security","inr":376}],"payments":"demo"} };</script>
 <script>const LIB = (() => {
 // Job sources. Each one fetches a public feed and returns jobs in one common shape:
 // { company, title, category, description, salary_min, salary_max, location, apply_url, external_id, tags, posted_at }
@@ -665,6 +665,55 @@ const ats = {
       }));
     },
   },
+  // SmartRecruiters (e.g. Swiggy, Bosch, ServiceNow): Indian postings only, since big employers list thousands worldwide.
+  // Its list has no descriptions, so they're read one by one, only for postings we keep (remote, or internships).
+  smartrecruiters: {
+    label: 'SmartRecruiters',
+    async fetch(board, company) {
+      const base = `https://api.smartrecruiters.com/v1/companies/${encodeURIComponent(board)}/postings`;
+      const list = [];
+      for (let offset = 0; offset < 2000; offset += 100) {
+        const d = await getJson(`${base}?country=in&limit=100&offset=${offset}`);
+        list.push(...(d.content || []));
+        if (offset + 100 >= (d.totalFound || 0)) break;
+      }
+      const intern = p => /intern/i.test(`${p.typeOfEmployment?.id} ${p.experienceLevel?.id}`) || isInternship({ title: p.name });
+      const keep = list.filter(p => p.location?.remote || intern(p));
+      const out = [];
+      for (const p of keep) {
+        let ad = {};
+        try { ad = await getJson(`${base}/${p.id}`); } catch { /* list details are enough */ }
+        const sec = ad.jobAd?.sections || {};
+        out.push({
+          company, title: p.name, category: p.function?.label || p.department?.label,
+          description: htmlToText([sec.jobDescription?.text, sec.qualifications?.text, sec.additionalInformation?.text].filter(Boolean).join('<br>')),
+          location: p.location?.fullLocation || [p.location?.city, 'India'].filter(Boolean).join(', '),
+          remote: Boolean(p.location?.remote), workplace: p.location?.remote ? 'remote' : p.location?.hybrid ? 'hybrid' : 'office',
+          kind: intern(p) ? 'internship' : undefined,
+          apply_url: ad.postingUrl || `https://jobs.smartrecruiters.com/${encodeURIComponent(board)}/${p.id}`,
+          external_id: `smartrecruiters-${board}-${p.id}`, tags: [p.typeOfEmployment?.label].filter(Boolean), posted_at: toIso(p.releasedDate),
+        });
+      }
+      return out;
+    },
+  },
+  // Workable: its public job widget lists every open role with the description
+  workable: {
+    label: 'Workable',
+    async fetch(board, company) {
+      const { jobs = [] } = await getJson(`https://apply.workable.com/api/v1/widget/accounts/${encodeURIComponent(board)}?details=true`);
+      return jobs.map(j => {
+        const where = [j.city, j.state, j.country].filter(Boolean).join(', ');
+        return {
+          company, title: j.title, category: j.department || null, description: htmlToText(j.description),
+          location: j.telecommuting ? (where ? `Remote, ${where}` : 'Remote') : where,
+          remote: Boolean(j.telecommuting), workplace: j.telecommuting ? 'remote' : 'office',
+          apply_url: j.url || j.application_url || `https://apply.workable.com/${board}/j/${j.shortcode}/`,
+          external_id: `workable-${board}-${j.shortcode}`, tags: [j.employment_type].filter(Boolean), posted_at: toIso(j.published_on || j.created_at),
+        };
+      });
+    },
+  },
 };
 
 // Turn a careers page link into { type, board }, e.g. https://jobs.lever.co/netflix -> { type: 'lever', board: 'netflix' }
@@ -679,6 +728,8 @@ function parseCareersUrl(url) {
   }
   if (/^jobs\.(eu\.)?lever\.co$/.test(host) && first) return { type: 'lever', board: first };
   if (host === 'jobs.ashbyhq.com' && first) return { type: 'ashby', board: first };
+  if ((host === 'jobs.smartrecruiters.com' || host === 'careers.smartrecruiters.com') && first) return { type: 'smartrecruiters', board: first };
+  if (host === 'apply.workable.com' && first) return { type: 'workable', board: first };
   return null;
 }
 
@@ -696,7 +747,7 @@ function audienceOf(text) {
 
 // Internships in offices in India (from company careers pages): the employer's own listing, in an Indian city
 const INDIA_PLACE = /india|bengaluru|bangalore|mumbai|delhi|gurugram|gurgaon|noida|pune|hyderabad|chennai|kolkata|ahmedabad|jaipur|kochi|chandigarh|indore/i;
-const internshipInIndia = j => isInternship(j) && INDIA_PLACE.test(j.location || '');
+const internshipInIndia = j => (j.kind === 'internship' || isInternship(j)) && INDIA_PLACE.test(j.location || '');
 const workplaceOf = j => j.remote !== false ? 'remote' : /hybrid/i.test(`${j.location} ${j.workplace || ''}`) ? 'hybrid' : 'office';
 
 const BOARDS = [remotive, himalayas, remoteok, jobicy, workingnomads, weworkremotely];
@@ -965,8 +1016,8 @@ function atsBoard(url) {
 }
 
 
-const INDIAN_COMPANIES = [{"name":"Razorpay","website":"https://razorpay.com","founded_year":2014,"hq_city":"Bengaluru","boards":["razorpay"]},{"name":"CRED","website":"https://cred.club","founded_year":2018,"hq_city":"Bengaluru","boards":["dreamplug"]},{"name":"Meesho","website":"https://www.meesho.com","founded_year":2015,"hq_city":"Bengaluru","boards":["meesho"]},{"name":"PhonePe","website":"https://www.phonepe.com","founded_year":2015,"hq_city":"Bengaluru","boards":["phonepe"]},{"name":"ShareChat","website":"https://sharechat.com","founded_year":2015,"hq_city":"Bengaluru","boards":["sharechat","mohallatech"]},{"name":"Paytm","website":"https://paytm.com","founded_year":2010,"hq_city":"Noida","boards":["paytm"]},{"name":"Groww","website":"https://groww.in","founded_year":2016,"hq_city":"Bengaluru","boards":["groww"]},{"name":"Swiggy","website":"https://www.swiggy.com","founded_year":2014,"hq_city":"Bengaluru","boards":["swiggy"]},{"name":"Dream Sports","website":"https://www.dreamsports.group","founded_year":2008,"hq_city":"Mumbai","boards":["dreamsports","dream11"]},{"name":"Unacademy","website":"https://unacademy.com","founded_year":2015,"hq_city":"Bengaluru","boards":["unacademy"]},{"name":"upGrad","website":"https://www.upgrad.com","founded_year":2015,"hq_city":"Mumbai","boards":["upgrad"]},{"name":"Juspay","website":"https://juspay.in","founded_year":2012,"hq_city":"Bengaluru","boards":["juspay"]},{"name":"Zeta","website":"https://www.zeta.tech","founded_year":2015,"hq_city":"Bengaluru","boards":["zetasuite"]},{"name":"InMobi","website":"https://www.inmobi.com","founded_year":2007,"hq_city":"Bengaluru","boards":["inmobi"]},{"name":"Urban Company","website":"https://www.urbancompany.com","founded_year":2014,"hq_city":"Gurugram","boards":["urbancompany","urbanclap"]},{"name":"Nykaa","website":"https://www.nykaa.com","founded_year":2012,"hq_city":"Mumbai","boards":["nykaa"]},{"name":"Ola","website":"https://www.olacabs.com","founded_year":2010,"hq_city":"Bengaluru","boards":["olacabs"]},{"name":"Spinny","website":"https://www.spinny.com","founded_year":2015,"hq_city":"Gurugram","boards":["spinny"]},{"name":"Slice","website":"https://www.sliceit.com","founded_year":2016,"hq_city":"Bengaluru","boards":["sliceit"]},{"name":"FamPay","website":"https://famapp.in","founded_year":2019,"hq_city":"Bengaluru","boards":["fampay"]},{"name":"Jar","website":"https://www.myjar.app","founded_year":2021,"hq_city":"Bengaluru","boards":["myjar"]}];
-const CAREERS_COMPANIES = [{"name":"Stripe","website":"https://stripe.com","founded_year":2010,"hq_country":"USA","hq_city":"South San Francisco","ats_type":"greenhouse","ats_board":"stripe"},{"name":"Rubrik","website":"https://www.rubrik.com","founded_year":2014,"hq_country":"USA","hq_city":"Palo Alto","ats_type":"greenhouse","ats_board":"rubrik"}];
+const INDIAN_COMPANIES = [{"name":"Razorpay","website":"https://razorpay.com","founded_year":2014,"hq_city":"Bengaluru","boards":["razorpay"]},{"name":"CRED","website":"https://cred.club","founded_year":2018,"hq_city":"Bengaluru","boards":["dreamplug"]},{"name":"Meesho","website":"https://www.meesho.com","founded_year":2015,"hq_city":"Bengaluru","boards":["meesho"]},{"name":"PhonePe","website":"https://www.phonepe.com","founded_year":2015,"hq_city":"Bengaluru","boards":["phonepe"]},{"name":"ShareChat","website":"https://sharechat.com","founded_year":2015,"hq_city":"Bengaluru","boards":["sharechat","mohallatech"]},{"name":"Paytm","website":"https://paytm.com","founded_year":2010,"hq_city":"Noida","boards":["paytm"]},{"name":"Groww","website":"https://groww.in","founded_year":2016,"hq_city":"Bengaluru","boards":["groww"]},{"name":"Swiggy","website":"https://www.swiggy.com","founded_year":2014,"hq_city":"Bengaluru","boards":["swiggy","Swiggy"]},{"name":"Dream Sports","website":"https://www.dreamsports.group","founded_year":2008,"hq_city":"Mumbai","boards":["dreamsports","dream11"]},{"name":"Unacademy","website":"https://unacademy.com","founded_year":2015,"hq_city":"Bengaluru","boards":["unacademy"]},{"name":"upGrad","website":"https://www.upgrad.com","founded_year":2015,"hq_city":"Mumbai","boards":["upgrad"]},{"name":"Juspay","website":"https://juspay.in","founded_year":2012,"hq_city":"Bengaluru","boards":["juspay"]},{"name":"Zeta","website":"https://www.zeta.tech","founded_year":2015,"hq_city":"Bengaluru","boards":["zetasuite"]},{"name":"InMobi","website":"https://www.inmobi.com","founded_year":2007,"hq_city":"Bengaluru","boards":["inmobi"]},{"name":"Urban Company","website":"https://www.urbancompany.com","founded_year":2014,"hq_city":"Gurugram","boards":["urbancompany","urbanclap"]},{"name":"Nykaa","website":"https://www.nykaa.com","founded_year":2012,"hq_city":"Mumbai","boards":["nykaa"]},{"name":"Ola","website":"https://www.olacabs.com","founded_year":2010,"hq_city":"Bengaluru","boards":["olacabs"]},{"name":"Spinny","website":"https://www.spinny.com","founded_year":2015,"hq_city":"Gurugram","boards":["spinny"]},{"name":"Slice","website":"https://www.sliceit.com","founded_year":2016,"hq_city":"Bengaluru","boards":["sliceit"]},{"name":"FamPay","website":"https://famapp.in","founded_year":2019,"hq_city":"Bengaluru","boards":["fampay"]},{"name":"Jar","website":"https://www.myjar.app","founded_year":2021,"hq_city":"Bengaluru","boards":["myjar"]}];
+const CAREERS_COMPANIES = [{"name":"Stripe","website":"https://stripe.com","founded_year":2010,"hq_country":"USA","hq_city":"South San Francisco","ats_type":"greenhouse","ats_board":"stripe"},{"name":"Rubrik","website":"https://www.rubrik.com","founded_year":2014,"hq_country":"USA","hq_city":"Palo Alto","ats_type":"greenhouse","ats_board":"rubrik"},{"name":"Bosch","website":"https://www.bosch.com","founded_year":1886,"hq_country":"Germany","hq_city":"Gerlingen","ats_type":"smartrecruiters","ats_board":"BoschGroup"},{"name":"ServiceNow","website":"https://www.servicenow.com","founded_year":2004,"hq_country":"USA","hq_city":"Santa Clara","ats_type":"smartrecruiters","ats_board":"ServiceNow"},{"name":"Freshworks","website":"https://www.freshworks.com","founded_year":2010,"hq_country":"USA","hq_city":"San Mateo","ats_type":"smartrecruiters","ats_board":"Freshworks"}];
 return { BOARDS, ats, INDIAN_COMPANIES, CAREERS_COMPANIES, checkJob, isInternship, internshipInIndia, workplaceOf, audienceOf, indiaEligible, classifySegment, textChecks, RED_FLAGS, hostOf, TRUSTED_APPLY_HOSTS, lookupCompany };
 })();</script>
 <script>// Full company profile from public records, for the "Company check" page: type a company's name, pick it,
@@ -1121,8 +1172,10 @@ if (typeof module !== 'undefined') module.exports = api;
 else window.ParakhProfile = api;
 })();
 </script>
-<script>// Public preview: loads REAL remote jobs from job websites in the visitor's browser and builds the same
-// job list, company reports and apply links the server builds. Uses the site's own parsers and checks (LIB).
+<script>// GitHub Pages version: builds the same job list, company reports and apply links the server builds, from REAL jobs.
+// Normally it loads data.json, which GitHub builds every 10 hours by running this same file in Node (preview/data.js),
+// so the page appears at once. Without a recent data.json it fetches the job sites in the visitor's browser instead.
+// Uses the site's own parsers and checks (LIB).
 const SEG_INFO = Object.fromEntries(DATA.pricing.segments.map(s => [s.key, s]));
 Object.assign(DATA, { list: null, job: {}, company: {}, applyUrl: {}, sources: [] });
 
@@ -1131,7 +1184,18 @@ const daysAgo = d => (Date.now() - Date.parse(d)) / 864e5;
 const MIN_SCORE = 50;   // jobs scoring under this are not posted (same rule as the server)
 const level = score => (score >= 70 ? 'verified' : score >= MIN_SCORE ? 'caution' : 'risky');
 
+const PREBUILT_MAX_AGE = 3 * 864e5;   // data.json older than 3 days (the scheduled build stopped?) is not used
+
 const READY = (async () => {
+  // 0. Ready-made data from the scheduled build, when this page is on the web next to a recent data.json
+  if (typeof window !== 'undefined' && /^https?:$/.test(location.protocol)) {
+    try {
+      const res = await fetch('data.json', { cache: 'no-cache' });
+      const pre = res.ok ? await res.json() : null;
+      if (pre?.list?.jobs?.length && Date.now() - Date.parse(pre.generated_at) < PREBUILT_MAX_AGE) { Object.assign(DATA, pre); return; }
+    } catch { /* fall back to fetching the job sites here */ }
+  }
+
   // 1. Fetch every job board at once; any that fail are skipped
   const results = await Promise.allSettled(LIB.BOARDS.map(b => withTimeout(b.fetch(), 25000)));
   const raw = [];
@@ -1145,7 +1209,10 @@ const READY = (async () => {
   // Indian companies' own careers pages: try each usual page name until one answers (browsers may block some)
   const indian = await Promise.all(LIB.INDIAN_COMPANIES.map(async c => {
     for (const board of c.boards) for (const type of Object.keys(LIB.ats)) {
-      try { return { c, label: `${c.name} careers page`, jobs: await withTimeout(LIB.ats[type].fetch(board, c.name), 12000) }; } catch { /* next */ }
+      try {
+        const jobs = await withTimeout(LIB.ats[type].fetch(board, c.name), 12000);
+        if (jobs.length || !['smartrecruiters', 'workable'].includes(type)) return { c, label: `${c.name} careers page`, jobs };
+      } catch { /* next */ }
     }
     return null;
   }));
@@ -1207,7 +1274,8 @@ const READY = (async () => {
       if (d.employee_count >= 50) add(+8, `${d.employee_count}+ employees`);
       else if (d.employee_count >= 10) add(+4, `${d.employee_count} employees`);
       else if (d.employee_count) add(0, `Small team (${d.employee_count})`);
-      if (d.linkedin_url) add(+5, 'Has LinkedIn company page'); else add(-5, 'No LinkedIn company page');
+      // Details from our own company list don't record LinkedIn pages, so a missing one only counts against Wikidata records
+      if (d.linkedin_url) add(+5, 'Has LinkedIn company page'); else if (!d.from_team) add(-5, 'No LinkedIn company page');
       add(0, `Website: ${LIB.hostOf(d.website) || d.website}`, 'Website age is checked on the full Parakh site');
     }
     if (n > 25) add(+2, `${n} open remote roles right now`, 'Very high volume — check the roles are real');
