@@ -335,3 +335,11 @@ test('SmartRecruiters and Workable careers pages: Indian internships and remote 
   assert.deepEqual(parseCareersUrl('https://jobs.smartrecruiters.com/BoschGroup'), { type: 'smartrecruiters', board: 'BoschGroup' });
   assert.deepEqual(parseCareersUrl('https://apply.workable.com/acme/'), { type: 'workable', board: 'acme' });
 });
+
+test('WhatsApp as one of several contact options is not a scam sign; WhatsApp-only contact is', () => {
+  const { textChecks } = require('../lib/verify');
+  const has = t => textChecks(t).some(f => f.label === 'Recruiter only on WhatsApp or Telegram');
+  assert.ok(!has('By applying, you consent to being contacted by our Talent Acquisition team via phone call, email, SMS, WhatsApp, or other channels.'));
+  assert.ok(has('Interested candidates message HR on WhatsApp 98xxxxxx10.'));
+  assert.ok(has('Join our Telegram group t.me/jobs for the next steps.'));
+});

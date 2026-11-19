@@ -36,7 +36,7 @@ const READY = (async () => {
   const indian = await Promise.all(LIB.INDIAN_COMPANIES.map(async c => {
     for (const board of c.boards) for (const type of Object.keys(LIB.ats)) {
       try {
-        const jobs = await withTimeout(LIB.ats[type].fetch(board, c.name), 12000);
+        const jobs = await withTimeout(LIB.ats[type].fetch(board, c.name), 40000);
         if (jobs.length || !['smartrecruiters', 'workable'].includes(type)) return { c, label: `${c.name} careers page`, jobs };
       } catch { /* next */ }
     }
@@ -44,7 +44,7 @@ const READY = (async () => {
   }));
   // Well-known companies with Indian offices: their careers pages are known
   const global = await Promise.all(LIB.CAREERS_COMPANIES.map(async c => {
-    try { return { c, label: `${c.name} careers page`, jobs: await withTimeout(LIB.ats[c.ats_type].fetch(c.ats_board, c.name), 15000) }; } catch { return null; }
+    try { return { c, label: `${c.name} careers page`, jobs: await withTimeout(LIB.ats[c.ats_type].fetch(c.ats_board, c.name), 45000) }; } catch { return null; }
   }));
   // Remote jobs open to India, plus internships in Indian offices (in office or hybrid)
   const indianOpen = [...indian, ...global].filter(Boolean).flatMap(x => x.jobs.filter(j => j.title && /^https?:\/\//.test(j.apply_url || '') && (LIB.indiaEligible(j) || LIB.internshipInIndia(j)))
